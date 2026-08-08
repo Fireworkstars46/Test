@@ -1,5 +1,6 @@
 name: Prepare video review
 
+# Temporary one-time helper for this test video.
 on:
   push:
     paths:
