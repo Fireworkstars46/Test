@@ -2,9 +2,9 @@ name: Prepare video review
 
 # Temporary one-time helper for this test video.
 on:
-  push:
+  pull_request:
     paths:
-      - '.github/workflows/prepare-video-review.yml'
+      - 'video-review-trigger.txt'
   workflow_dispatch:
 
 permissions:
