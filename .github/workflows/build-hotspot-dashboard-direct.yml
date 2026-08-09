@@ -1,0 +1,91 @@
+name: Build Hotspot Dashboard Direct IPA
+
+on:
+  push:
+    branches:
+      - hotspot-dashboard-build
+    paths:
+      - '.github/workflows/build-hotspot-dashboard-direct.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Recover embedded source archive
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/build-hotspot-dashboard.yml')
+          text = p.read_text()
+          marker = "cat > source.b64 <<'EOF'\n"
+          start = text.index(marker) + len(marker)
+          end = text.index("\nEOF", start)
+          payload = text[start:end].strip()
+          Path('source.b64').write_text(payload + '\n')
+          PY
+          base64 --decode source.b64 > HotspotDashboard-iOS16-Source.zip
+          mkdir source
+          unzip -q HotspotDashboard-iOS16-Source.zip -d source
+          find source -maxdepth 3 -type f -print
+
+      - name: Build unsigned iPhone app
+        id: compile
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cd source
+          xcodebuild \
+            -project HotspotDashboard.xcodeproj \
+            -target HotspotDashboard \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$PWD/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee ../build.log
+
+      - name: Package IPA when build succeeded
+        if: steps.compile.outcome == 'success'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APP="$(find source/DerivedData/Build/Products -type d -name 'HotspotDashboard.app' | head -n 1)"
+          test -n "$APP"
+          mkdir -p package/Payload
+          cp -R "$APP" package/Payload/
+          cd package
+          /usr/bin/zip -qry ../HotspotDashboard.ipa Payload
+          cd ..
+          ls -lh HotspotDashboard.ipa
+          file HotspotDashboard.ipa
+
+      - name: Save build result to temporary branch
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf source package source.b64 HotspotDashboard-iOS16-Source.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- build.log || true
+          if [ -f HotspotDashboard.ipa ]; then git add -- HotspotDashboard.ipa; fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Store Hotspot Dashboard IPA build result"
+          git push origin HEAD:hotspot-dashboard-build
+
+      - name: Fail workflow when compiler failed
+        if: steps.compile.outcome != 'success'
+        shell: bash
+        run: exit 1
