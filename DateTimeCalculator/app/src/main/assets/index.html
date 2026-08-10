@@ -5,109 +5,480 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Date Time Calculator</title>
 <style>
-:root{--bg:#f2f2f7;--card:#fff;--line:#d1d1d6;--text:#111;--muted:#6e6e73;--blue:#007aff}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}body{padding-bottom:78px}button,input{font:inherit}.top{height:50px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:#f8f8fa;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}.title{font-size:17px;font-weight:600}.sync{border:0;background:transparent;color:var(--blue);font-weight:600;padding:10px 4px}.screen{display:none;padding:12px 0 22px}.screen.active{display:block}.section{margin:8px 16px 7px;color:var(--muted);font-size:13px;text-transform:uppercase}.group{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.row{min-height:50px;margin-left:16px;padding:7px 16px 7px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.row:last-child{border-bottom:0}.label{font-size:16px}.value{text-align:right;max-width:67%;font-size:16px}.field{width:min(66%,270px);display:flex;justify-content:flex-end}input[type=date],input[type=time],input[type=datetime-local]{width:100%;border:0;background:transparent;padding:8px 0;text-align:right;color:var(--text);outline:none;font-size:16px}input[type=number]{width:88px;height:38px;border:1px solid #c7c7cc;border-radius:8px;padding:5px 8px;text-align:right;background:#fff}.bar{display:flex;gap:9px;justify-content:center;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line)}.btn{min-width:78px;border:1px solid #aaa;border-radius:7px;background:#fafafa;padding:8px 10px}.btn.primary{color:var(--blue);border-color:#8dbdf5;background:#f7fbff}.note{padding:10px 16px 0;color:var(--muted);font-size:13px}.seg{display:flex;width:min(66%,270px);border:1px solid var(--blue);border-radius:8px;overflow:hidden}.seg button{flex:1;border:0;border-right:1px solid var(--blue);background:#fff;color:var(--blue);padding:7px}.seg button:last-child{border-right:0}.seg button.active{background:var(--blue);color:#fff}.result{margin:14px 16px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}.result .cap{font-size:13px;color:var(--muted);text-transform:uppercase;margin-bottom:6px}.result .main{font-size:21px;font-weight:600;line-height:1.28}.result .small{font-size:13px;color:var(--muted);margin-top:6px}.switch{position:relative;width:51px;height:31px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;border-radius:18px;background:#d1d1d6}.slider:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #999;transition:.15s}.switch input:checked+.slider{background:#34c759}.switch input:checked+.slider:before{transform:translateX(20px)}.nav{position:fixed;left:0;right:0;bottom:0;height:74px;background:#fafafa;border-top:1px solid #bbb;display:grid;grid-template-columns:repeat(5,1fr);padding-bottom:max(3px,env(safe-area-inset-bottom));z-index:10}.tab{border:0;background:transparent;color:#8e8e93;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 1px}.tab.active{color:var(--blue)}.ico{font-size:22px;line-height:1}.txt{font-size:10px;white-space:nowrap}.toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:#222e;color:#fff;border-radius:18px;padding:8px 12px;font-size:13px;opacity:0;pointer-events:none;transition:.15s;z-index:20}.toast.show{opacity:1}
+:root{
+  --bg:#f0f0f6; --paper:#fff; --line:#d7d7dc; --text:#171717;
+  --muted:#9a9aa0; --sel:#f2f0f4; --dark:#2c292d; --soft:#eceaee;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+button,input{font:inherit;color:inherit}
+button{touch-action:manipulation}
+.app{height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.header{height:48px;min-height:48px;background:#fff;border-bottom:1px solid #c9c9ce;display:flex;
+  align-items:center;justify-content:center;position:relative;font-size:18px;font-weight:600}
+.trash{position:absolute;right:14px;top:8px;width:32px;height:32px;border:0;background:transparent;padding:4px;display:none}
+.trash svg{width:24px;height:24px;stroke:#222;fill:none;stroke-width:1.8}
+.content{flex:1;min-height:0;position:relative;overflow:hidden}
+.page{position:absolute;inset:0;display:none;flex-direction:column;background:#fff;overflow:hidden}
+.page.active{display:flex}
+.spacer{height:20px;min-height:20px;background:var(--bg);border-bottom:1px solid #dcdce2}
+.rows{background:#fff}
+.row{height:51px;min-height:51px;margin-left:18px;padding-right:18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:18px}
+.row.selected{background:#d7d5d8;margin-left:0;padding-left:18px}
+.row:last-child{border-bottom:0}
+.row .label{white-space:nowrap}
+.value{margin-left:auto;text-align:right;max-width:72%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.switch{position:relative;width:54px;height:32px;flex:0 0 54px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;border-radius:19px;background:#d6d4d7;box-shadow:inset 0 0 0 1px #cbc9cc}
+.slider:after{content:"";position:absolute;width:28px;height:28px;left:2px;top:2px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px #8a8a8a;transition:.12s}
+.switch input:checked+.slider{background:#2d2a2e}
+.switch input:checked+.slider:after{transform:translateX(22px)}
+.blank{flex:1;min-height:54px;background:var(--bg);border-top:1px solid #dddde4;border-bottom:1px solid #dddde4}
+.controlbar{height:58px;min-height:58px;background:#fff;display:flex;align-items:center;justify-content:space-around;padding:0 17px;
+  border-bottom:1px solid #e0e0e3}
+.rectbtn{height:36px;min-width:88px;padding:0 12px;border:1.3px solid #4d4a4e;border-radius:4px;background:#fff;font-size:16px}
+.chev{font-size:27px;font-weight:200;line-height:1;transform:rotate(0deg);border:0;background:transparent;padding:2px 8px 8px}
+.wheelwrap{height:250px;min-height:185px;max-height:31vh;background:#fff;position:relative;overflow:hidden}
+.wheelshade{position:absolute;left:11px;right:11px;top:50%;height:43px;transform:translateY(-50%);background:#f1eff2;border-radius:9px;z-index:0}
+.wheels{position:absolute;inset:0;display:flex;justify-content:center;padding:0 7px;z-index:1}
+.wheel{height:100%;overflow-y:auto;scroll-snap-type:y mandatory;scrollbar-width:none;text-align:center;color:#aaa9ad}
+.wheel::-webkit-scrollbar{display:none}
+.wheel .pad{height:calc(50% - 21px)}
+.wheel .opt{height:43px;line-height:43px;scroll-snap-align:center;font-size:21px;white-space:nowrap}
+.wheel .opt.active{color:#272427;font-size:24px}
+.wheel.month{width:42%}.wheel.day{width:18%}.wheel.year{width:27%}
+.wheel.hour{width:24%}.wheel.minute{width:24%}.wheel.ampm{width:24%}
+.wheel.datewide{width:48%}.wheel.dtnum{width:17%}
+.calcpage{overflow:auto;padding-bottom:0}
+.calcpage::-webkit-scrollbar{display:none}
+.calc-top{background:#fff}
+.calc-row{min-height:51px;margin-left:18px;padding:6px 18px 6px 0;border-bottom:1px solid var(--line);
+  display:grid;grid-template-columns:94px 142px 1fr;align-items:center;gap:10px;font-size:18px}
+.calc-row.fromto{grid-template-columns:86px 1fr}
+.calc-row .calc-value{text-align:right}
+.signseg{display:flex;height:38px;border-radius:10px;overflow:hidden;background:var(--soft)}
+.signseg button{width:50%;border:0;background:transparent;font-size:17px}
+.signseg button.on{background:var(--dark);color:#fff;border-radius:8px}
+.num{width:100%;height:38px;border:1px solid #d6d4da;border-radius:7px;background:#fff;text-align:right;padding:0 8px;font-size:18px;outline:none}
+.num:focus{border-color:#b9b6bd}
+.resultgap{height:20px;background:var(--bg);border-top:1px solid #dddde3;border-bottom:1px solid #dddde3}
+.calc-results .row{height:51px}
+.subtabs{height:42px;margin:10px 18px 11px;border-radius:10px;background:#eceaed;display:grid;grid-template-columns:repeat(3,1fr);overflow:hidden}
+.subtab{border:0;background:transparent;font-size:15px;position:relative}
+.subtab:not(:last-child):after{content:"";position:absolute;right:0;top:9px;bottom:9px;width:1px;background:#d4d2d7}
+.subtab.active{background:#2d2a2e;color:#fff;border-radius:8px}
+.time-tape{flex:1;min-height:470px;background:#fff;position:relative;padding:10px 18px 5px}
+.tape-line{height:51px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-size:17px}
+.tape-big{margin-top:auto}
+.settings{background:var(--bg)}
+.abouttitle{height:39px;display:flex;align-items:center;padding-left:20px;color:#7c7b81;font-size:15px;background:#efeff5;border-bottom:1px solid #d9d9df}
+.settingrow{height:55px;margin-left:19px;padding-right:18px;border-bottom:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:space-between;font-size:18px}
+.settingsbox{background:#fff}
+.chevron{font-size:29px;color:#c0bec4;font-weight:200}
+.proicon{width:67px;height:67px;border-radius:12px;background:linear-gradient(#1da7e2,#167cca);color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;margin-right:12px}
+.proicon strong{font-size:34px;line-height:.9}.proicon small{font-size:10px}
+.proline{height:79px;margin-left:19px;padding-right:18px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+.protext{font-size:18px;line-height:1.25}.protext small{font-size:14px}
+.bottomnav{height:62px;min-height:62px;background:#fff;border-top:1px solid #c9c9ce;display:grid;grid-template-columns:repeat(5,1fr)}
+.navbtn{border:0;background:#fff;color:#9f9da2;padding:4px 0 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.navbtn.active{color:#222}
+.navbtn svg{width:28px;height:28px;stroke:currentColor;fill:none;stroke-width:1.4}
+.navbtn .navtxt{font-size:11px}
+.toast{position:absolute;left:50%;bottom:72px;transform:translateX(-50%);background:#222e;color:#fff;padding:8px 13px;border-radius:18px;font-size:13px;opacity:0;transition:.15s;z-index:30;pointer-events:none}
+.toast.show{opacity:1}
+@media (max-width:390px){
+  .row,.calc-row{font-size:17px}
+  .row{height:49px;min-height:49px}
+  .calc-row{grid-template-columns:78px 118px 1fr}
+  .rectbtn{min-width:78px;font-size:15px}
+  .wheel .opt{font-size:19px}.wheel .opt.active{font-size:22px}
+}
 </style>
 </head>
 <body>
-<header class="top"><div class="title" id="title">Date</div><button class="sync" id="sync">Sync Now</button></header>
-<main>
-<section class="screen active" data-page="date">
-<div class="section">Date Difference</div><div class="group">
-<div class="row"><span class="label">From</span><div class="field"><input id="dateFrom" type="date"></div></div>
-<div class="row"><span class="label">To</span><div class="field"><input id="dateTo" type="date"></div></div>
-<div class="row"><span class="label">Include To Date</span><label class="switch"><input id="includeTo" type="checkbox"><span class="slider"></span></label></div>
-<div class="row"><span class="label">Days</span><span class="value" id="dateDays"></span></div>
-<div class="row"><span class="label">Weeks</span><span class="value" id="dateWeeks"></span></div>
-<div class="row"><span class="label">Months</span><span class="value" id="dateMonths"></span></div>
-<div class="row"><span class="label">Years & Months</span><span class="value" id="dateYMD"></span></div>
-</div><div class="bar"><button class="btn" id="dateFromPick">From</button><button class="btn" id="dateToPick">To</button><button class="btn primary" id="today">Today</button></div>
-</section>
-<section class="screen" data-page="time">
-<div class="section">Time Difference</div><div class="group">
-<div class="row"><span class="label">From</span><div class="field"><input id="timeFrom" type="time" step="60"></div></div>
-<div class="row"><span class="label">To</span><div class="field"><input id="timeTo" type="time" step="60"></div></div>
-<div class="row"><span class="label">Hours</span><span class="value" id="timeHours"></span></div>
-<div class="row"><span class="label">Minutes</span><span class="value" id="timeMinutes"></span></div>
-<div class="row"><span class="label">Hours & Minutes</span><span class="value" id="timeHM"></span></div>
-</div><div class="bar"><button class="btn" id="timeFromPick">From</button><button class="btn" id="timeToPick">To</button><button class="btn primary" id="nowTime">Now</button></div>
-</section>
-<section class="screen" data-page="datetime">
-<div class="section">Date & Time Difference</div><div class="group">
-<div class="row"><span class="label">From</span><div class="field"><input id="dtFrom" type="datetime-local" step="60"></div></div>
-<div class="row"><span class="label">To</span><div class="field"><input id="dtTo" type="datetime-local" step="60"></div></div>
-<div class="row"><span class="label">Days</span><span class="value" id="dtDays"></span></div>
-<div class="row"><span class="label">Hours</span><span class="value" id="dtHours"></span></div>
-<div class="row"><span class="label">Minutes</span><span class="value" id="dtMinutes"></span></div>
-<div class="row"><span class="label">Detailed</span><span class="value" id="dtDetailed"></span></div>
-</div><div class="bar"><button class="btn" id="dtFromPick">From</button><button class="btn" id="dtToPick">To</button><button class="btn primary" id="nowDT">Now</button></div>
-</section>
-<section class="screen" data-page="calculator">
-<div class="section">Add / Subtract Date & Time</div><div class="group">
-<div class="row"><span class="label">Start</span><div class="field"><input id="start" type="datetime-local" step="60"></div></div>
-<div class="row"><span class="label">Operation</span><div class="seg"><button id="add" class="active">Add +</button><button id="sub">Subtract −</button></div></div>
-<div class="row"><span class="label">Years</span><input id="years" type="number" min="0" value="0"></div>
-<div class="row"><span class="label">Months</span><input id="months" type="number" min="0" value="0"></div>
-<div class="row"><span class="label">Weeks</span><input id="weeks" type="number" min="0" value="0"></div>
-<div class="row"><span class="label">Days</span><input id="days" type="number" min="0" value="0"></div>
-<div class="row"><span class="label">Hours</span><input id="hours" type="number" min="0" value="0"></div>
-<div class="row"><span class="label">Minutes</span><input id="minutes" type="number" min="0" value="0"></div>
-</div><div class="bar"><button class="btn primary" id="startNow">Start = Now</button><button class="btn" id="clear">Clear</button></div>
-<div class="result"><div class="cap">Result</div><div class="main" id="calcResult"></div><div class="small" id="calcSummary"></div></div>
-</section>
-<section class="screen" data-page="settings">
-<div class="section">Display</div><div class="group">
-<div class="row"><span class="label">24-Hour Time</span><label class="switch"><input id="use24" type="checkbox"><span class="slider"></span></label></div>
-<div class="row"><span class="label">Show Seconds</span><label class="switch"><input id="seconds" type="checkbox"><span class="slider"></span></label></div>
-<div class="row"><span class="label">Sync to Now on Open</span><label class="switch"><input id="auto" type="checkbox" checked><span class="slider"></span></label></div>
-<div class="row" id="reset"><span class="label" style="color:#007aff">Reset Everything to Now</span><span class="value">›</span></div>
-</div><div class="note">No account or internet connection is needed. Calculations use the date and time on your phone.</div>
-</section>
-</main>
-<nav class="nav">
-<button class="tab active" data-tab="date"><span class="ico">▣</span><span class="txt">Date</span></button>
-<button class="tab" data-tab="time"><span class="ico">◷</span><span class="txt">Time</span></button>
-<button class="tab" data-tab="datetime"><span class="ico">◫</span><span class="txt">Date Time</span></button>
-<button class="tab" data-tab="calculator"><span class="ico">＋−</span><span class="txt">Calculator</span></button>
-<button class="tab" data-tab="settings"><span class="ico">⚙</span><span class="txt">Settings</span></button>
-</nav><div class="toast" id="toast">Synced to now</div>
+<div class="app">
+  <div class="header"><span id="title">Date</span><button class="trash" id="trash" aria-label="Clear calculator">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 10v8M14 10v8"/></svg>
+  </button></div>
+
+  <div class="content">
+    <section class="page active" id="page-date">
+      <div class="spacer"></div>
+      <div class="rows">
+        <div class="row selected" id="dateFromRow"><span class="label">From</span><span class="value" id="dateFromText"></span></div>
+        <div class="row" id="dateToRow"><span class="label">To</span><span class="value" id="dateToText"></span></div>
+        <div class="row"><span>Include To Date</span><label class="switch"><input type="checkbox" id="dateInclude"><span class="slider"></span></label></div>
+        <div class="row"><span>Days</span><span class="value" id="dateDays"></span></div>
+        <div class="row"><span>Weeks</span><span class="value" id="dateWeeks"></span></div>
+        <div class="row"><span>Months</span><span class="value" id="dateMonths"></span></div>
+        <div class="row"><span>Years</span><span class="value" id="dateYears"></span></div>
+      </div>
+      <div class="controlbar">
+        <button class="rectbtn" id="dateFromBtn">From</button>
+        <button class="rectbtn" id="dateToBtn">To</button>
+        <button class="rectbtn" id="dateTodayBtn">Today</button>
+        <button class="chev">⌄</button>
+      </div>
+      <div class="wheelwrap">
+        <div class="wheelshade"></div>
+        <div class="wheels">
+          <div class="wheel month" id="dateMonth"></div>
+          <div class="wheel day" id="dateDay"></div>
+          <div class="wheel year" id="dateYear"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-time">
+      <div class="spacer"></div>
+      <div class="rows">
+        <div class="row selected" id="timeFromRow"><span>From Time</span><span class="value" id="timeFromText"></span></div>
+        <div class="row" id="timeToRow"><span>To Time</span><span class="value" id="timeToText"></span></div>
+        <div class="row"><span>Hours</span><span class="value" id="timeHours"></span></div>
+        <div class="row"><span>Minutes</span><span class="value" id="timeMinutes"></span></div>
+        <div class="row"><span>Seconds</span><span class="value" id="timeSeconds"></span></div>
+      </div>
+      <div class="blank"></div>
+      <div class="controlbar">
+        <button class="rectbtn" id="timeFromBtn">From Time</button>
+        <button class="rectbtn" id="timeToBtn">To Time</button>
+        <button class="rectbtn" id="timeNowBtn">Now</button>
+      </div>
+      <div class="wheelwrap">
+        <div class="wheelshade"></div>
+        <div class="wheels">
+          <div class="wheel hour" id="timeHour"></div>
+          <div class="wheel minute" id="timeMinute"></div>
+          <div class="wheel ampm" id="timeAmPm"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-datetime">
+      <div class="spacer"></div>
+      <div class="rows">
+        <div class="row selected" id="dtFromRow"><span>From</span><span class="value" id="dtFromText"></span></div>
+        <div class="row" id="dtToRow"><span>To</span><span class="value" id="dtToText"></span></div>
+        <div class="row"><span>Days</span><span class="value" id="dtDays"></span></div>
+        <div class="row"><span>Hours</span><span class="value" id="dtHours"></span></div>
+        <div class="row"><span>Minutes</span><span class="value" id="dtMinutes"></span></div>
+        <div class="row"><span>Seconds</span><span class="value" id="dtSeconds"></span></div>
+      </div>
+      <div class="blank"></div>
+      <div class="controlbar">
+        <button class="rectbtn" id="dtFromBtn">From</button>
+        <button class="rectbtn" id="dtToBtn">To</button>
+        <button class="rectbtn" id="dtNowBtn">Now</button>
+      </div>
+      <div class="wheelwrap">
+        <div class="wheelshade"></div>
+        <div class="wheels">
+          <div class="wheel datewide" id="dtDate"></div>
+          <div class="wheel dtnum" id="dtHour"></div>
+          <div class="wheel dtnum" id="dtMinute"></div>
+          <div class="wheel dtnum" id="dtAmPm"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page calcpage" id="page-calculator">
+      <div id="calc-date" class="calcview">
+        <div class="spacer"></div>
+        <div class="calc-top">
+          <div class="calc-row fromto"><span>From</span><div class="calc-value" id="cDateFrom"></div></div>
+          <div class="calc-row"><span>Days</span><div class="signseg" data-sign="cdays"><button class="on">+</button><button>-</button></div><input class="num" id="cdays" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row"><span>Weeks</span><div class="signseg" data-sign="cweeks"><button class="on">+</button><button>-</button></div><input class="num" id="cweeks" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row"><span>Months</span><div class="signseg" data-sign="cmonths"><button class="on">+</button><button>-</button></div><input class="num" id="cmonths" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row"><span>Years</span><div class="signseg" data-sign="cyears"><button class="on">+</button><button>-</button></div><input class="num" id="cyears" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row fromto"><span>To</span><div class="calc-value" id="cDateTo"></div></div>
+        </div>
+        <div class="resultgap"></div>
+        <div class="calc-results">
+          <div class="row"><span>Include To Date</span><label class="switch"><input type="checkbox" id="cDateInclude"><span class="slider"></span></label></div>
+          <div class="row"><span>Days</span><span class="value" id="cDateDays"></span></div>
+          <div class="row"><span>Weeks</span><span class="value" id="cDateWeeks"></span></div>
+          <div class="row"><span>Months</span><span class="value" id="cDateMonths"></span></div>
+          <div class="row"><span>Years</span><span class="value" id="cDateYears"></span></div>
+          <div class="row"><span>Years & Months</span><span class="value" id="cDateYM"></span></div>
+        </div>
+      </div>
+
+      <div id="calc-time" class="calcview" style="display:none">
+        <div class="spacer"></div>
+        <div class="time-tape">
+          <div class="tape-line"></div><div class="tape-line"></div><div class="tape-line"></div><div class="tape-line"></div>
+          <div class="tape-line"></div><div class="tape-line"></div><div class="tape-line"></div>
+          <div class="tape-line tape-big"><span></span><span id="tapeStart">00:00</span></div>
+          <div class="tape-line"><span>+</span><span id="tapeAdd">00:00</span></div>
+          <div class="tape-line"><span>=</span><span id="tapeResult">00:00</span></div>
+        </div>
+      </div>
+
+      <div id="calc-datetime" class="calcview" style="display:none">
+        <div class="spacer"></div>
+        <div class="calc-top">
+          <div class="calc-row fromto"><span>From</span><div class="calc-value" id="cDtFrom"></div></div>
+          <div class="calc-row"><span>Days</span><div class="signseg" data-sign="cddays"><button class="on">+</button><button>-</button></div><input class="num" id="cddays" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row"><span>Hours</span><div class="signseg" data-sign="cdhours"><button class="on">+</button><button>-</button></div><input class="num" id="cdhours" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row"><span>Minutes</span><div class="signseg" data-sign="cdminutes"><button class="on">+</button><button>-</button></div><input class="num" id="cdminutes" type="number" min="0" inputmode="numeric" value="0"></div>
+          <div class="calc-row fromto"><span>To</span><div class="calc-value" id="cDtTo"></div></div>
+        </div>
+        <div class="resultgap"></div>
+        <div class="calc-results">
+          <div class="row"><span>Days</span><span class="value" id="cDtDays"></span></div>
+          <div class="row"><span>Hours</span><span class="value" id="cDtHours"></span></div>
+          <div class="row"><span>Minutes</span><span class="value" id="cDtMinutes"></span></div>
+          <div class="row"><span>Seconds</span><span class="value" id="cDtSeconds"></span></div>
+        </div>
+        <div class="controlbar">
+          <button class="rectbtn" id="calcNowBtn">Now</button>
+          <button class="rectbtn" id="calcDoneBtn">Done</button>
+        </div>
+        <div class="wheelwrap">
+          <div class="wheelshade"></div>
+          <div class="wheels">
+            <div class="wheel datewide" id="calcDtDate"></div>
+            <div class="wheel dtnum" id="calcDtHour"></div>
+            <div class="wheel dtnum" id="calcDtMinute"></div>
+            <div class="wheel dtnum" id="calcDtAmPm"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subtabs">
+        <button class="subtab active" data-calc="date">Date</button>
+        <button class="subtab" data-calc="time">Time</button>
+        <button class="subtab" data-calc="datetime">Date Time</button>
+      </div>
+    </section>
+
+    <section class="page settings" id="page-settings">
+      <div class="abouttitle">ABOUT</div>
+      <div class="settingsbox">
+        <div class="settingrow"><span>Version</span><span style="color:#77767b">1.14.0</span></div>
+        <div class="settingrow"><span>Rate App</span><span class="chevron">›</span></div>
+        <div class="proline"><div class="proicon"><small>FR&nbsp;&nbsp;&nbsp;Pro</small><strong>23</strong><span>+ −</span></div><div class="protext">Date Calculator Pro<br><small>$0.99</small></div><span class="chevron" style="margin-left:auto">›</span></div>
+      </div>
+    </section>
+    <div class="toast" id="toast">Synced to now</div>
+  </div>
+
+  <nav class="bottomnav">
+    <button class="navbtn active" data-page="date">
+      <svg viewBox="0 0 30 30"><rect x="3" y="5" width="24" height="22"/><path d="M3 10h24M8 2v6M22 2v6"/><text x="15" y="23" text-anchor="middle" font-size="11" fill="currentColor" stroke="none">21</text></svg><span class="navtxt">Date</span>
+    </button>
+    <button class="navbtn" data-page="time">
+      <svg viewBox="0 0 30 30"><circle cx="15" cy="15" r="13"/><path d="M15 5v10l6 4M15 1v3M15 26v3M1 15h3M26 15h3"/></svg><span class="navtxt">Time</span>
+    </button>
+    <button class="navbtn" data-page="datetime">
+      <svg viewBox="0 0 30 30"><rect x="3" y="5" width="24" height="22"/><path d="M3 10h24M8 2v6M22 2v6"/><text x="15" y="23" text-anchor="middle" font-size="11" fill="currentColor" stroke="none">23</text></svg><span class="navtxt">Date Time</span>
+    </button>
+    <button class="navbtn" data-page="calculator">
+      <svg viewBox="0 0 30 30"><rect x="6" y="3" width="18" height="24" rx="2"/><rect x="9" y="6" width="12" height="5"/><path d="M9 15h3M15 15h3M21 15h0M9 19h3M15 19h3M21 19h0M9 23h3M15 23h3M21 23h0"/></svg><span class="navtxt">Calculator</span>
+    </button>
+    <button class="navbtn" data-page="settings">
+      <svg viewBox="0 0 30 30"><circle cx="15" cy="15" r="5"/><path d="M15 1v4M15 25v4M1 15h4M25 15h4M5 5l3 3M22 22l3 3M25 5l-3 3M8 22l-3 3"/><circle cx="15" cy="15" r="12"/></svg><span class="navtxt">Settings</span>
+    </button>
+  </nav>
+</div>
+
 <script>
 (()=>{
-const $=id=>document.getElementById(id),DAY=86400000,HOUR=3600000,MIN=60000;
-let page='date',dateTarget='to',timeTarget='to',dtTarget='to',op=1;
-let cfg={use24:localStorage.getItem('use24')==='1',seconds:localStorage.getItem('seconds')==='1',auto:localStorage.getItem('auto')!=='0'};
+const $=id=>document.getElementById(id), DAY=86400000, HOUR=3600000, MIN=60000;
 const pad=n=>String(n).padStart(2,'0');
-const dateVal=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-const timeVal=d=>`${pad(d.getHours())}:${pad(d.getMinutes())}`;
-const dtVal=d=>`${dateVal(d)}T${timeVal(d)}`;
-const parseDate=v=>v?new Date(v+'T12:00:00'):null;
-const parseDT=v=>v?new Date(v):null;
-const timeM=v=>{if(!v)return null;let [h,m]=v.split(':').map(Number);return h*60+m};
-function toast(s='Synced to now'){let t=$('toast');t.textContent=s;t.classList.add('show');clearTimeout(toast.x);toast.x=setTimeout(()=>t.classList.remove('show'),1100)}
-function fmtTime(d){let o={hour:'numeric',minute:'2-digit',hour12:!cfg.use24};if(cfg.seconds)o.second='2-digit';return new Intl.DateTimeFormat('en-US',o).format(d)}
-function fmtDate(d){return new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}).format(d)}
-function dim(y,m){return new Date(y,m+1,0).getDate()}
-function calYMD(a,b){let sign=1;if(b<a){[a,b]=[b,a];sign=-1}let y=b.getFullYear()-a.getFullYear(),m=b.getMonth()-a.getMonth(),d=b.getDate()-a.getDate();if(d<0){m--;let pm=(b.getMonth()+11)%12,py=b.getMonth()===0?b.getFullYear()-1:b.getFullYear();d+=dim(py,pm)}if(m<0){y--;m+=12}return{sign,y,m,d}}
-function updateDate(){let a=parseDate($('dateFrom').value),b=parseDate($('dateTo').value);if(!a||!b)return;let n=Math.round((Date.UTC(b.getFullYear(),b.getMonth(),b.getDate())-Date.UTC(a.getFullYear(),a.getMonth(),a.getDate()))/DAY);if($('includeTo').checked)n+=n>=0?1:-1;$('dateDays').textContent=`${n} Day${Math.abs(n)===1?'':'s'}`;let x=Math.abs(n),w=Math.floor(x/7),d=x%7;$('dateWeeks').textContent=`${n<0?'−':''}${w} Week${w===1?'':'s'} ${d} Day${d===1?'':'s'}`;let c=calYMD(a,b),p=c.sign<0?'−':'',tm=c.y*12+c.m;$('dateMonths').textContent=`${p}${tm} Month${tm===1?'':'s'} ${c.d} Day${c.d===1?'':'s'}`;$('dateYMD').textContent=`${p}${c.y} Year${c.y===1?'':'s'} ${c.m} Month${c.m===1?'':'s'} ${c.d} Day${c.d===1?'':'s'}`}
-function updateTime(){let a=timeM($('timeFrom').value),b=timeM($('timeTo').value);if(a===null||b===null)return;let d=b-a,x=Math.abs(d),h=Math.floor(x/60),m=x%60,p=d<0?'−':'';$('timeHours').textContent=`${(d/60).toFixed(d%60?2:0)} Hours`;$('timeMinutes').textContent=`${d} Minutes`;$('timeHM').textContent=`${p}${h} Hour${h===1?'':'s'} ${m} Minute${m===1?'':'s'}`}
-function updateDT(){let a=parseDT($('dtFrom').value),b=parseDT($('dtTo').value);if(!a||!b)return;let d=b-a,p=d<0?'−':'',x=Math.abs(d),days=Math.floor(x/DAY),h=Math.floor((x%DAY)/HOUR),m=Math.floor((x%HOUR)/MIN);$('dtDays').textContent=`${(d/DAY).toFixed(3).replace(/\.000$/,'')} Days`;$('dtHours').textContent=`${(d/HOUR).toFixed(2).replace(/\.00$/,'')} Hours`;$('dtMinutes').textContent=`${Math.round(d/MIN)} Minutes`;$('dtDetailed').textContent=`${p}${days} Day${days===1?'':'s'} ${h} Hour${h===1?'':'s'} ${m} Minute${m===1?'':'s'}`}
-const n=id=>Math.max(0,Number($(id).value)||0);
-function addYears(d,x){if(!x)return;let m=d.getMonth(),day=d.getDate();d.setDate(1);d.setFullYear(d.getFullYear()+x);d.setMonth(m);d.setDate(Math.min(day,dim(d.getFullYear(),m)))}
-function addMonths(d,x){if(!x)return;let day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+x);d.setDate(Math.min(day,dim(d.getFullYear(),d.getMonth())))}
-function updateCalc(){let s=parseDT($('start').value);if(!s){$('calcResult').textContent='Choose a start date and time';return}let d=new Date(s),y=n('years')*op,mo=n('months')*op,w=n('weeks')*op,da=n('days')*op,h=n('hours')*op,mi=n('minutes')*op;addYears(d,y);addMonths(d,mo);d.setDate(d.getDate()+w*7+da);d.setHours(d.getHours()+h);d.setMinutes(d.getMinutes()+mi);$('calcResult').textContent=`${fmtDate(d)} at ${fmtTime(d)}`;let a=[];[['years','y'],['months','mo'],['weeks','w'],['days','d'],['hours','h'],['minutes','m']].forEach(([id,u])=>{let v=n(id);if(v)a.push(v+u)});$('calcSummary').textContent=a.length?`${op>0?'Added':'Subtracted'} ${a.join(' ')} from ${fmtDate(s)} at ${fmtTime(s)}.`:`Same as the start time: ${fmtDate(s)} at ${fmtTime(s)}.`}
-function updateAll(){updateDate();updateTime();updateDT();updateCalc()}
-const stateIds=['dateFrom','dateTo','includeTo','timeFrom','timeTo','dtFrom','dtTo','start','years','months','weeks','days','hours','minutes'];
-function save(){stateIds.forEach(id=>{let e=$(id);localStorage.setItem('s_'+id,e.type==='checkbox'?(e.checked?'1':'0'):e.value)});localStorage.setItem('s_op',String(op))}
-function load(){if(!localStorage.getItem('s_start'))return false;stateIds.forEach(id=>{let e=$(id),v=localStorage.getItem('s_'+id);if(v!==null){if(e.type==='checkbox')e.checked=v==='1';else e.value=v}});op=localStorage.getItem('s_op')==='-1'?-1:1;setOp(op);return true}
-function setAllNow(show=true){let d=new Date();$('dateFrom').value=$('dateTo').value=dateVal(d);$('timeFrom').value=$('timeTo').value=timeVal(d);$('dtFrom').value=$('dtTo').value=dtVal(d);$('start').value=dtVal(d);updateAll();save();if(show)toast()}
-function setOp(v){op=v;$('add').classList.toggle('active',v===1);$('sub').classList.toggle('active',v===-1)}
-function syncPage(){let d=new Date();if(page==='date'){$('dateFrom').value=$('dateTo').value=dateVal(d);updateDate()}else if(page==='time'){$('timeFrom').value=$('timeTo').value=timeVal(d);updateTime()}else if(page==='datetime'){$('dtFrom').value=$('dtTo').value=dtVal(d);updateDT()}else if(page==='calculator'){$('start').value=dtVal(d);updateCalc()}else setAllNow(false);save();toast()}
-const titles={date:'Date',time:'Time',datetime:'Date Time',calculator:'Calculator',settings:'Settings'};
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{page=t.dataset.tab;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.dataset.page===page));$('title').textContent=titles[page]}));
-['dateFrom','dateTo','includeTo'].forEach(id=>$(id).addEventListener('change',()=>{updateDate();save()}));['timeFrom','timeTo'].forEach(id=>$(id).addEventListener('change',()=>{updateTime();save()}));['dtFrom','dtTo'].forEach(id=>$(id).addEventListener('change',()=>{updateDT();save()}));['start','years','months','weeks','days','hours','minutes'].forEach(id=>{['input','change'].forEach(ev=>$(id).addEventListener(ev,()=>{updateCalc();save()}))});
-$('dateFromPick').onclick=()=>{dateTarget='from';$('dateFrom').click()};$('dateToPick').onclick=()=>{dateTarget='to';$('dateTo').click()};$('today').onclick=()=>{let id=dateTarget==='from'?'dateFrom':'dateTo';$(id).value=dateVal(new Date());updateDate();save();toast('Set to today')};$('timeFromPick').onclick=()=>{timeTarget='from';$('timeFrom').click()};$('timeToPick').onclick=()=>{timeTarget='to';$('timeTo').click()};$('nowTime').onclick=()=>{let id=timeTarget==='from'?'timeFrom':'timeTo';$(id).value=timeVal(new Date());updateTime();save();toast('Set to current time')};$('dtFromPick').onclick=()=>{dtTarget='from';$('dtFrom').click()};$('dtToPick').onclick=()=>{dtTarget='to';$('dtTo').click()};$('nowDT').onclick=()=>{let id=dtTarget==='from'?'dtFrom':'dtTo';$(id).value=dtVal(new Date());updateDT();save();toast()};$('startNow').onclick=()=>{$('start').value=dtVal(new Date());updateCalc();save();toast('Start synced to now')};$('clear').onclick=()=>{['years','months','weeks','days','hours','minutes'].forEach(id=>$(id).value=0);updateCalc();save()};$('add').onclick=()=>{setOp(1);updateCalc();save()};$('sub').onclick=()=>{setOp(-1);updateCalc();save()};$('sync').onclick=syncPage;
-$('use24').checked=cfg.use24;$('seconds').checked=cfg.seconds;$('auto').checked=cfg.auto;$('use24').onchange=e=>{cfg.use24=e.target.checked;localStorage.setItem('use24',cfg.use24?'1':'0');updateCalc()};$('seconds').onchange=e=>{cfg.seconds=e.target.checked;localStorage.setItem('seconds',cfg.seconds?'1':'0');updateCalc()};$('auto').onchange=e=>{cfg.auto=e.target.checked;localStorage.setItem('auto',cfg.auto?'1':'0')};$('reset').onclick=()=>setAllNow(true);
-if(cfg.auto||!load())setAllNow(false);else updateAll();
+const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+let page='date', dateTarget='from', timeTarget='from', dtTarget='from', calcMode='date';
+let state={
+ dateFrom:new Date(2021,2,1,12,0), dateTo:new Date(), dateInclude:false,
+ timeFrom:{h:16,m:0}, timeTo:{h:new Date().getHours(),m:new Date().getMinutes()},
+ dtFrom:new Date(Date.now()-46*MIN), dtTo:new Date(),
+ calcDateFrom:new Date(2021,2,1,12,0), calcDtFrom:new Date()
+};
+const signs={cdays:1,cweeks:1,cmonths:1,cyears:1,cddays:1,cdhours:1,cdminutes:1};
+
+function clone(d){return new Date(d.getTime())}
+function startOfDate(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate(),12)}
+function daysInMonth(y,m){return new Date(y,m+1,0).getDate()}
+function fmtDate(d,weekday=true){
+ return new Intl.DateTimeFormat('en-US',{weekday:weekday?'long':undefined,month:'long',day:'numeric',year:'numeric'}).format(d);
+}
+function fmtTimeHM(h,m){
+ let ap=h>=12?'PM':'AM', hh=h%12||12; return `${hh}:${pad(m)} ${ap}`;
+}
+function fmtTime(d){return fmtTimeHM(d.getHours(),d.getMinutes())}
+function fmtDT(d,weekday=false){return `${fmtDate(d,weekday)} at ${fmtTime(d)}`}
+function plural(n,s){return `${n} ${s}${Math.abs(n)===1?'':'s'}`}
+function ymdDiff(a,b){
+ let sign=1;if(b<a){let t=a;a=b;b=t;sign=-1}
+ let y=b.getFullYear()-a.getFullYear(),m=b.getMonth()-a.getMonth(),d=b.getDate()-a.getDate();
+ if(d<0){m--;let pm=(b.getMonth()+11)%12,py=b.getMonth()===0?b.getFullYear()-1:b.getFullYear();d+=daysInMonth(py,pm)}
+ if(m<0){y--;m+=12}
+ return {sign,y,m,d};
+}
+function dateDiffText(a,b,inc){
+ let da=startOfDate(a), db=startOfDate(b);
+ let total=Math.round((Date.UTC(db.getFullYear(),db.getMonth(),db.getDate())-Date.UTC(da.getFullYear(),da.getMonth(),da.getDate()))/DAY);
+ if(inc) total += total>=0?1:-1;
+ let x=Math.abs(total),pre=total<0?'−':'',w=Math.floor(x/7),wd=x%7,c=ymdDiff(da,db),cp=c.sign<0?'−':'';
+ return {
+   days:`${total} Days`,
+   weeks:`${pre}${w} Weeks ${wd} Days`,
+   months:`${cp}${c.y*12+c.m} Months ${c.d} Days`,
+   years:`${cp}${c.y} Years ${Math.max(0,Math.round((db-new Date(da.getFullYear()+c.y,da.getMonth(),da.getDate()))/DAY))} Days`,
+   ym:`${cp}${c.y} Years ${c.m} Months ${c.d} Days`
+ };
+}
+function toast(msg='Synced to now'){let t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.x);toast.x=setTimeout(()=>t.classList.remove('show'),900)}
+
+function updateDateScreen(){
+ $('dateFromText').textContent=fmtDate(state.dateFrom);$('dateToText').textContent=fmtDate(state.dateTo);
+ let r=dateDiffText(state.dateFrom,state.dateTo,$('dateInclude').checked);
+ $('dateDays').textContent=r.days;$('dateWeeks').textContent=r.weeks;$('dateMonths').textContent=r.months;$('dateYears').textContent=r.years;
+}
+function updateTimeScreen(){
+ $('timeFromText').textContent=fmtTimeHM(state.timeFrom.h,state.timeFrom.m);$('timeToText').textContent=fmtTimeHM(state.timeTo.h,state.timeTo.m);
+ let a=state.timeFrom.h*60+state.timeFrom.m,b=state.timeTo.h*60+state.timeTo.m,d=b-a;
+ if(d<0)d+=1440;
+ let h=Math.floor(d/60),m=d%60;
+ $('timeHours').textContent=`${h} Hours ${m} Minutes`;$('timeMinutes').textContent=`${d} Minutes`;$('timeSeconds').textContent=`${d*60} Seconds`;
+}
+function updateDtScreen(){
+ $('dtFromText').textContent=fmtDT(state.dtFrom,false);$('dtToText').textContent=fmtDT(state.dtTo,false);
+ let d=state.dtTo-state.dtFrom,pre=d<0?'−':'',x=Math.abs(d),days=Math.floor(x/DAY),h=Math.floor((x%DAY)/HOUR),m=Math.floor((x%HOUR)/MIN),s=Math.floor(x/1000);
+ $('dtDays').textContent=`${pre}${days} Days ${h} Hours ${m} Minutes`;
+ $('dtHours').textContent=`${pre}${Math.floor(x/HOUR)} Hours ${m} Minutes`;
+ $('dtMinutes').textContent=`${pre}${Math.floor(x/MIN)} Minutes`;
+ $('dtSeconds').textContent=`${pre}${s.toLocaleString()} Seconds`;
+}
+function addMonthsSafe(d,n){if(!n)return;let day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+n);d.setDate(Math.min(day,daysInMonth(d.getFullYear(),d.getMonth())))}
+function addYearsSafe(d,n){if(!n)return;let m=d.getMonth(),day=d.getDate();d.setDate(1);d.setFullYear(d.getFullYear()+n);d.setMonth(m);d.setDate(Math.min(day,daysInMonth(d.getFullYear(),m)))}
+function n(id){return Math.max(0,parseInt($(id).value||'0',10)||0)}
+function updateCalcDate(){
+ $('cDateFrom').textContent=fmtDate(state.calcDateFrom);
+ let d=clone(state.calcDateFrom); d.setDate(d.getDate()+signs.cdays*n('cdays')+signs.cweeks*n('cweeks')*7);addMonthsSafe(d,signs.cmonths*n('cmonths'));addYearsSafe(d,signs.cyears*n('cyears'));
+ $('cDateTo').textContent=fmtDate(d);
+ let r=dateDiffText(state.calcDateFrom,d,$('cDateInclude').checked);
+ $('cDateDays').textContent=r.days;$('cDateWeeks').textContent=r.weeks;$('cDateMonths').textContent=r.months;$('cDateYears').textContent=r.years;$('cDateYM').textContent=r.ym;
+}
+function updateCalcDt(){
+ $('cDtFrom').textContent=fmtDT(state.calcDtFrom,false);
+ let d=clone(state.calcDtFrom);d.setDate(d.getDate()+signs.cddays*n('cddays'));d.setHours(d.getHours()+signs.cdhours*n('cdhours'));d.setMinutes(d.getMinutes()+signs.cdminutes*n('cdminutes'));
+ $('cDtTo').textContent=fmtDT(d,false);
+ let dif=d-state.calcDtFrom,pre=dif<0?'−':'',x=Math.abs(dif),days=Math.floor(x/DAY),h=Math.floor((x%DAY)/HOUR),m=Math.floor((x%HOUR)/MIN);
+ $('cDtDays').textContent=`${pre}${days} Days ${h} Hours ${m} Minutes`;$('cDtHours').textContent=`${pre}${Math.floor(x/HOUR)} Hours ${m} Minutes`;
+ $('cDtMinutes').textContent=`${pre}${Math.floor(x/MIN).toLocaleString()} Minutes`;$('cDtSeconds').textContent=`${pre}${Math.floor(x/1000).toLocaleString()} Seconds`;
+}
+function updateAll(){updateDateScreen();updateTimeScreen();updateDtScreen();updateCalcDate();updateCalcDt()}
+
+function makeWheel(el,items,selected,onpick){
+ el.innerHTML='<div class="pad"></div>'+items.map((x,i)=>`<div class="opt" data-i="${i}">${x}</div>`).join('')+'<div class="pad"></div>';
+ const opts=[...el.querySelectorAll('.opt')];
+ function select(i,fire=true){i=Math.max(0,Math.min(items.length-1,i));opts.forEach((o,k)=>o.classList.toggle('active',k===i));el.dataset.i=i;el.scrollTop=opts[i].offsetTop-(el.clientHeight-43)/2;if(fire)onpick(i)}
+ requestAnimationFrame(()=>select(selected,false));
+ let timer;
+ el.addEventListener('scroll',()=>{clearTimeout(timer);timer=setTimeout(()=>{let center=el.scrollTop+el.clientHeight/2,best=0,dist=1e9;opts.forEach((o,i)=>{let c=o.offsetTop+21.5,v=Math.abs(c-center);if(v<dist){dist=v;best=i}});select(best,true)},75)});
+ opts.forEach((o,i)=>o.addEventListener('click',()=>select(i,true)));
+ return {select};
+}
+function buildDateWheel(){
+ let d=dateTarget==='from'?state.dateFrom:state.dateTo,days=Array.from({length:31},(_,i)=>i+1),years=Array.from({length:181},(_,i)=>1950+i);
+ makeWheel($('dateMonth'),months,d.getMonth(),i=>setDateWheel(i,null,null));
+ makeWheel($('dateDay'),days,d.getDate()-1,i=>setDateWheel(null,i+1,null));
+ makeWheel($('dateYear'),years,d.getFullYear()-1950,i=>setDateWheel(null,null,years[i]));
+}
+function setDateWheel(m,day,y){
+ let d=clone(dateTarget==='from'?state.dateFrom:state.dateTo);if(m!==null)d.setMonth(m);if(y!==null)d.setFullYear(y);if(day!==null)d.setDate(Math.min(day,daysInMonth(d.getFullYear(),d.getMonth())));
+ if(dateTarget==='from')state.dateFrom=d;else state.dateTo=d;updateDateScreen();
+}
+function buildTimeWheel(){
+ let t=timeTarget==='from'?state.timeFrom:state.timeTo,hr12=t.h%12||12,ap=t.h>=12?1:0;
+ makeWheel($('timeHour'),Array.from({length:12},(_,i)=>i+1),hr12-1,i=>setTimeWheel(i+1,null,null));
+ makeWheel($('timeMinute'),Array.from({length:60},(_,i)=>pad(i)),t.m,i=>setTimeWheel(null,i,null));
+ makeWheel($('timeAmPm'),['AM','PM'],ap,i=>setTimeWheel(null,null,i));
+}
+function setTimeWheel(hr12,min,ap){
+ let t=timeTarget==='from'?state.timeFrom:state.timeTo,oldap=t.h>=12?1:0,h12=t.h%12||12;
+ if(hr12!==null)h12=hr12;if(min!==null)t.m=min;if(ap!==null)oldap=ap;t.h=(h12%12)+(oldap?12:0);updateTimeScreen();
+}
+function relativeDateLabel(d){
+ let now=new Date(),a=startOfDate(d),b=startOfDate(now),n=Math.round((a-b)/DAY);
+ if(n===0)return 'Today';if(n===-1)return 'Yesterday';if(n===1)return 'Tomorrow';
+ return new Intl.DateTimeFormat('en-US',{weekday:'short',month:'short',day:'numeric'}).format(d);
+}
+function dtWheelData(base){
+ return Array.from({length:61},(_,i)=>{let d=clone(base);d.setDate(d.getDate()+i-30);return d});
+}
+function buildDtWheel(prefix,base,onset){
+ let dates=dtWheelData(base),h=base.getHours(),h12=h%12||12,ap=h>=12?1:0;
+ makeWheel($(prefix+'Date'),dates.map(relativeDateLabel),30,i=>{let d=dates[i];let n=clone(base);n.setFullYear(d.getFullYear(),d.getMonth(),d.getDate());base=n;onset(n);});
+ makeWheel($(prefix+'Hour'),Array.from({length:12},(_,i)=>i+1),h12-1,i=>{let n=clone(base),oldap=n.getHours()>=12;n.setHours(((i+1)%12)+(oldap?12:0));base=n;onset(n);});
+ makeWheel($(prefix+'Minute'),Array.from({length:60},(_,i)=>pad(i)),base.getMinutes(),i=>{let n=clone(base);n.setMinutes(i);base=n;onset(n);});
+ makeWheel($(prefix+'AmPm'),['AM','PM'],ap,i=>{let n=clone(base),hh=n.getHours()%12;n.setHours(hh+(i?12:0));base=n;onset(n);});
+}
+function buildMainDtWheel(){let b=clone(dtTarget==='from'?state.dtFrom:state.dtTo);buildDtWheel('dt',b,d=>{if(dtTarget==='from')state.dtFrom=d;else state.dtTo=d;updateDtScreen()})}
+function buildCalcDtWheel(){let b=clone(state.calcDtFrom);buildDtWheel('calcDt',b,d=>{state.calcDtFrom=d;updateCalcDt()})}
+
+function markDateTarget(t){dateTarget=t;$('dateFromRow').classList.toggle('selected',t==='from');$('dateToRow').classList.toggle('selected',t==='to');buildDateWheel()}
+function markTimeTarget(t){timeTarget=t;$('timeFromRow').classList.toggle('selected',t==='from');$('timeToRow').classList.toggle('selected',t==='to');buildTimeWheel()}
+function markDtTarget(t){dtTarget=t;$('dtFromRow').classList.toggle('selected',t==='from');$('dtToRow').classList.toggle('selected',t==='to');buildMainDtWheel()}
+
+$('dateFromBtn').onclick=()=>markDateTarget('from');$('dateToBtn').onclick=()=>markDateTarget('to');
+$('dateFromRow').onclick=()=>markDateTarget('from');$('dateToRow').onclick=()=>markDateTarget('to');
+$('dateTodayBtn').onclick=()=>{let d=new Date();if(dateTarget==='from')state.dateFrom=d;else state.dateTo=d;updateDateScreen();buildDateWheel();toast('Set to today')};
+$('dateInclude').onchange=updateDateScreen;
+$('timeFromBtn').onclick=()=>markTimeTarget('from');$('timeToBtn').onclick=()=>markTimeTarget('to');
+$('timeFromRow').onclick=()=>markTimeTarget('from');$('timeToRow').onclick=()=>markTimeTarget('to');
+$('timeNowBtn').onclick=()=>{let d=new Date(),t={h:d.getHours(),m:d.getMinutes()};if(timeTarget==='from')state.timeFrom=t;else state.timeTo=t;updateTimeScreen();buildTimeWheel();toast()};
+$('dtFromBtn').onclick=()=>markDtTarget('from');$('dtToBtn').onclick=()=>markDtTarget('to');
+$('dtFromRow').onclick=()=>markDtTarget('from');$('dtToRow').onclick=()=>markDtTarget('to');
+$('dtNowBtn').onclick=()=>{let d=new Date();if(dtTarget==='from')state.dtFrom=d;else state.dtTo=d;updateDtScreen();buildMainDtWheel();toast()};
+$('calcNowBtn').onclick=()=>{state.calcDtFrom=new Date();updateCalcDt();buildCalcDtWheel();toast()};
+$('calcDoneBtn').onclick=()=>toast('Done');
+$('cDateInclude').onchange=updateCalcDate;
+
+document.querySelectorAll('.signseg').forEach(seg=>{
+ const id=seg.dataset.sign,btns=[...seg.querySelectorAll('button')];
+ btns.forEach((b,i)=>b.addEventListener('click',()=>{signs[id]=i===0?1:-1;btns.forEach((x,k)=>x.classList.toggle('on',k===i));updateCalcDate();updateCalcDt()}));
+});
+['cdays','cweeks','cmonths','cyears'].forEach(id=>$(id).addEventListener('input',updateCalcDate));
+['cddays','cdhours','cdminutes'].forEach(id=>$(id).addEventListener('input',updateCalcDt));
+
+document.querySelectorAll('.subtab').forEach(b=>b.addEventListener('click',()=>{
+ calcMode=b.dataset.calc;document.querySelectorAll('.subtab').forEach(x=>x.classList.toggle('active',x===b));
+ ['date','time','datetime'].forEach(x=>$('calc-'+x).style.display=x===calcMode?'block':'none');
+ $('title').textContent=calcMode==='date'?'Date Calculator':calcMode==='time'?'Time Calculator':'Date Time Calculator';
+ if(calcMode==='datetime')buildCalcDtWheel();
+}));
+
+$('trash').onclick=()=>{
+ if(calcMode==='date'){['cdays','cweeks','cmonths','cyears'].forEach(id=>$(id).value='');updateCalcDate()}
+ else if(calcMode==='datetime'){['cddays','cdhours','cdminutes'].forEach(id=>$(id).value='');updateCalcDt()}
+ else{$('tapeStart').textContent=$('tapeAdd').textContent=$('tapeResult').textContent='00:00'}
+ toast('Cleared');
+};
+
+const titles={date:'Date',time:'Time',datetime:'Date Time',calculator:'Date Calculator',settings:'Settings'};
+document.querySelectorAll('.navbtn').forEach(btn=>btn.addEventListener('click',()=>{
+ page=btn.dataset.page;document.querySelectorAll('.navbtn').forEach(x=>x.classList.toggle('active',x===btn));
+ document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id==='page-'+page));
+ $('title').textContent=page==='calculator'?(calcMode==='date'?'Date Calculator':calcMode==='time'?'Time Calculator':'Date Time Calculator'):titles[page];
+ $('trash').style.display=page==='calculator'?'block':'none';
+ if(page==='date')buildDateWheel();if(page==='time')buildTimeWheel();if(page==='datetime')buildMainDtWheel();if(page==='calculator'&&calcMode==='datetime')buildCalcDtWheel();
+}));
+
+function initial(){
+ let now=new Date();state.dateTo=clone(now);state.timeTo={h:now.getHours(),m:now.getMinutes()};state.dtTo=clone(now);
+ state.dtFrom=new Date(now.getTime()-46*MIN);state.calcDtFrom=new Date(now.getTime()-45*MIN);
+ $('dateInclude').checked=false;$('cDateInclude').checked=true;
+ $('cddays').value=1;$('cdhours').value=10;$('cdminutes').value=15;
+ updateAll();markDateTarget('from');buildTimeWheel();buildMainDtWheel();buildCalcDtWheel();
+}
+initial();
 })();
 </script>
-</body></html>
+</body>
+</html>
