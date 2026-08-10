@@ -48,6 +48,16 @@ jobs:
           retention-days: 7
           compression-level: 0
 
+      - name: Publish direct APK download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view DateTimeCalculator >/dev/null 2>&1; then
+            gh release upload DateTimeCalculator Date-Time-Calculator-v2.apk --clobber
+          else
+            gh release create DateTimeCalculator Date-Time-Calculator-v2.apk --title "Date Time Calculator" --notes "Latest Android build"
+          fi
+
       - name: Commit APK to build branch
         run: |
           git config user.name "github-actions[bot]"
