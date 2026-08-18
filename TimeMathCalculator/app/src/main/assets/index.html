@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Time Math Calculator</title>
+<style>
+:root{
+  --bg:#fff;--text:#161616;--muted:#777;--line:#ececec;--key:#f4f4f4;--keyDown:#e6e6e6;
+  --op:#eaf6ec;--opText:#2e7d32;--eq:#43a047;--eqText:#fff;--tool:#f8f8f8;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:Roboto,"Segoe UI",Arial,sans-serif;color:var(--text)}
+button{font:inherit;color:inherit;border:0;outline:0;touch-action:manipulation}
+.app{height:100%;display:flex;flex-direction:column;background:#fff;padding-bottom:max(0px,env(safe-area-inset-bottom))}
+.top{height:48px;min-height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--line)}
+.title{font-size:19px;font-weight:600}.repeatBadge{font-size:12px;color:var(--muted);padding:5px 9px;border-radius:12px;background:#f5f5f5}
+.display{flex:1;min-height:185px;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;padding:16px 20px 14px;overflow:hidden}
+.expr{width:100%;text-align:right;color:#666;font-size:23px;line-height:1.35;min-height:32px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.result{width:100%;text-align:right;font-size:50px;font-weight:400;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:8px}
+.detail{width:100%;text-align:right;color:#7a7a7a;font-size:14px;min-height:20px;margin-top:5px}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:9px 14px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff}
+.tool{height:38px;border-radius:19px;background:var(--tool);font-size:15px}.tool:active{background:#e9e9e9}.tool.now{color:var(--opText);font-weight:600}.tool.back{font-size:21px}
+.pad{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(5,1fr);gap:10px;padding:12px 15px 15px;height:min(52vh,480px);min-height:360px;background:#fff}
+.key{border-radius:999px;background:var(--key);font-size:25px;font-weight:400;min-height:56px}.key:active{background:var(--keyDown)}
+.key.op{background:var(--op);color:var(--opText);font-size:28px}.key.op:active{background:#dcefe0}
+.key.eq{background:var(--eq);color:var(--eqText);font-size:30px}.key.eq:active{filter:brightness(.92)}
+.key.small{font-size:20px}.key.clear{color:#c62828;font-weight:500}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#222e;color:#fff;border-radius:18px;padding:7px 12px;font-size:13px;opacity:0;pointer-events:none;transition:.15s;z-index:50}.toast.show{opacity:1}
+@media(max-height:730px){.top{height:43px;min-height:43px}.display{min-height:145px;padding-top:8px}.result{font-size:43px}.pad{min-height:325px;gap:8px;padding-top:9px}.tools{padding-top:7px;padding-bottom:8px}.tool{height:34px}.key{min-height:50px}}
+@media(max-width:380px){.result{font-size:44px}.expr{font-size:21px}.pad{gap:8px;padding-left:12px;padding-right:12px}.tools{gap:6px;padding-left:11px;padding-right:11px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top"><div class="title">Time Math Calculator</div><div class="repeatBadge">= repeats</div></div>
+  <div class="display">
+    <div class="expr" id="expr">&nbsp;</div>
+    <div class="result" id="result">0</div>
+    <div class="detail" id="detail">Clock times + durations + normal math</div>
+  </div>
+
+  <div class="tools">
+    <button class="tool now" data-k="NOW">Now</button>
+    <button class="tool" data-k=":">:</button>
+    <button class="tool" data-k="AM">AM</button>
+    <button class="tool" data-k="PM">PM</button>
+    <button class="tool" data-k="hr">hr</button>
+    <button class="tool" data-k="min">min</button>
+    <button class="tool" data-k="sec">sec</button>
+    <button class="tool back" data-k="BACK">⌫</button>
+  </div>
+
+  <div class="pad">
+    <button class="key clear" data-k="C">C</button>
+    <button class="key small" data-k="PAREN">( )</button>
+    <button class="key small" data-k="%">%</button>
+    <button class="key op" data-k="÷">÷</button>
+
+    <button class="key" data-k="7">7</button>
+    <button class="key" data-k="8">8</button>
+    <button class="key" data-k="9">9</button>
+    <button class="key op" data-k="×">×</button>
+
+    <button class="key" data-k="4">4</button>
+    <button class="key" data-k="5">5</button>
+    <button class="key" data-k="6">6</button>
+    <button class="key op" data-k="−">−</button>
+
+    <button class="key" data-k="1">1</button>
+    <button class="key" data-k="2">2</button>
+    <button class="key" data-k="3">3</button>
+    <button class="key op" data-k="+">+</button>
+
+    <button class="key small" data-k="SIGN">±</button>
+    <button class="key" data-k="0">0</button>
+    <button class="key" data-k=".">.</button>
+    <button class="key eq" data-k="=">=</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(()=>{
+'use strict';
+const SEC=1, MIN=60, HOUR=3600, DAY=86400;
+const $=id=>document.getElementById(id);
+let expr='';
+let lastValue=null;
+let lastRepeat=null;
+let justCalculated=false;
+let repeatLine='';
+
+const value=(kind,n)=>({kind,value:n});
+const copy=v=>v?{kind:v.kind,value:v.value}:null;
+const isValue=t=>t&&t.type==='value';
+const opSymbol=o=>o==='*'?'×':o==='/'?'÷':o==='-'?'−':o;
+
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),1200)}
+function pad2(n){return String(n).padStart(2,'0')}
+function formatClockSeconds(total){
+  let day=Math.floor(total/DAY), s=((total%DAY)+DAY)%DAY;
+  let h=Math.floor(s/HOUR), m=Math.floor((s%HOUR)/MIN), sec=Math.round(s%MIN);
+  if(sec===60){sec=0;m++;if(m===60){m=0;h=(h+1)%24}}
+  let ap=h>=12?'PM':'AM', hh=h%12||12;
+  return {main:`${hh}:${pad2(m)}${sec?':'+pad2(sec):''} ${ap}`,day};
+}
+function dayName(d){if(d===0)return 'Today';if(d===1)return 'Tomorrow';if(d===-1)return 'Yesterday';return d>0?`+${d} days`:`${d} days`}
+function formatDuration(s){
+  if(!Number.isFinite(s))return 'Error';
+  let sign=s<0?'−':'',x=Math.abs(s);
+  if(x<1)return sign+(Math.round(x*1000)/1000)+' sec';
+  let h=Math.floor(x/HOUR),m=Math.floor((x%HOUR)/MIN),sec=Math.round(x%MIN);
+  if(sec===60){sec=0;m++}if(m===60){m=0;h++}
+  let parts=[];if(h)parts.push(`${h} hr`);if(m)parts.push(`${m} min`);if(sec||!parts.length)parts.push(`${sec} sec`);
+  return sign+parts.join(' ');
+}
+function formatNumber(n){
+  if(!Number.isFinite(n))return 'Error';
+  if(Math.abs(n)<1e-12)n=0;
+  return Number(n.toPrecision(12)).toLocaleString('en-US',{maximumFractionDigits:10});
+}
+function formatValue(v){if(!v)return '0';if(v.kind==='clock')return formatClockSeconds(v.value).main;if(v.kind==='duration')return formatDuration(v.value);return formatNumber(v.value)}
+function detailValue(v){if(!v)return 'Clock times + durations + normal math';if(v.kind==='clock'){let f=formatClockSeconds(v.value);return dayName(f.day)}if(v.kind==='duration')return `${formatNumber(v.value/60)} total minutes`;return 'Normal number'}
+function displayExprText(s){return s.replace(/ANS/g,lastValue?formatValue(lastValue):'0').replace(/\*/g,'×').replace(/\//g,'÷').replace(/-/g,'−').replace(/\s+/g,' ').trim()}
+
+function parseDurationChunk(chunk){
+  let total=0,found=false,re=/(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)\b/gi,m;
+  while((m=re.exec(chunk))){found=true;let n=parseFloat(m[1]),u=m[2].toLowerCase();if(u.startsWith('h'))total+=n*HOUR;else if(u.startsWith('m'))total+=n*MIN;else total+=n;}
+  return found?value('duration',total):null;
+}
+function tokenize(raw){
+  let src=raw.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');
+  const vals=[];
+  const add=v=>{let id=vals.length;vals.push(v);return ` §${id} `};
+  src=src.replace(/\b(1[0-2]|0?[1-9]):([0-5]?\d)(?::([0-5]?\d))?\s*(AM|PM)\b/gi,(all,hh,mm,ss,ap)=>{
+    let h=parseInt(hh,10)%12+(String(ap).toUpperCase()==='PM'?12:0);return add(value('clock',h*HOUR+parseInt(mm,10)*MIN+(ss?parseInt(ss,10):0)));
+  });
+  src=src.replace(/\b([01]?\d|2[0-3]):([0-5]?\d)(?::([0-5]?\d))?\b/g,(all,hh,mm,ss)=>add(value('clock',parseInt(hh,10)*HOUR+parseInt(mm,10)*MIN+(ss?parseInt(ss,10):0))));
+  const durRe=/((?:\d+(?:\.\d+)?\s*(?:hours?|hrs?|hr|h|minutes?|mins?|min|m|seconds?|secs?|sec|s)\b\s*)+)/gi;
+  src=src.replace(durRe,all=>{let v=parseDurationChunk(all);return v?add(v):all});
+
+  const out=[];let i=0;
+  while(i<src.length){
+    let c=src[i];if(/\s/.test(c)){i++;continue}
+    if(c==='§'){i++;let j=i;while(j<src.length&&/\d/.test(src[j]))j++;out.push({type:'value',v:copy(vals[parseInt(src.slice(i,j),10)])});i=j;continue}
+    if(src.slice(i,i+3).toUpperCase()==='ANS'&&!/[A-Za-z]/.test(src[i+3]||'')){if(!lastValue)throw Error('No previous answer');out.push({type:'value',v:copy(lastValue)});i+=3;continue}
+    let nm=src.slice(i).match(/^\d+(?:\.\d+)?/);if(nm){out.push({type:'value',v:value('number',parseFloat(nm[0]))});i+=nm[0].length;continue}
+    if('+-*/^%()'.includes(c)){out.push({type:'op',op:c});i++;continue}
+    throw Error('Check the expression');
+  }
+  return out;
+}
+function applyUnary(v,op){
+  if(op==='u-')return value(v.kind,-v.value);
+  if(op==='%'){if(v.kind==='clock')throw Error('Percent cannot be used on a clock time');return value(v.kind,v.value/100)}
+  throw Error('Unsupported operation');
+}
+function applyBinary(a,op,b){
+  if(op==='+'){
+    if(a.kind==='clock'&&b.kind==='duration')return value('clock',a.value+b.value);
+    if(a.kind==='duration'&&b.kind==='clock')return value('clock',b.value+a.value);
+    if(a.kind==='duration'&&b.kind==='duration')return value('duration',a.value+b.value);
+    if(a.kind==='number'&&b.kind==='number')return value('number',a.value+b.value);
+  }
+  if(op==='-'){
+    if(a.kind==='clock'&&b.kind==='duration')return value('clock',a.value-b.value);
+    if(a.kind==='clock'&&b.kind==='clock')return value('duration',a.value-b.value);
+    if(a.kind==='duration'&&b.kind==='duration')return value('duration',a.value-b.value);
+    if(a.kind==='number'&&b.kind==='number')return value('number',a.value-b.value);
+  }
+  if(op==='*'){
+    if(a.kind==='duration'&&b.kind==='number')return value('duration',a.value*b.value);
+    if(a.kind==='number'&&b.kind==='duration')return value('duration',a.value*b.value);
+    if(a.kind==='number'&&b.kind==='number')return value('number',a.value*b.value);
+  }
+  if(op==='/'){
+    if(b.value===0)throw Error('Cannot divide by zero');
+    if(a.kind==='duration'&&b.kind==='number')return value('duration',a.value/b.value);
+    if(a.kind==='duration'&&b.kind==='duration')return value('number',a.value/b.value);
+    if(a.kind==='number'&&b.kind==='number')return value('number',a.value/b.value);
+  }
+  if(op==='^'&&a.kind==='number'&&b.kind==='number')return value('number',Math.pow(a.value,b.value));
+  throw Error('Those types cannot be used with '+opSymbol(op));
+}
+function toRpn(tokens){
+  const out=[],stack=[];const prec={'%':5,'u-':4,'^':3,'*':2,'/':2,'+':1,'-':1};const right={'u-':1,'^':1};
+  let prev='start';
+  tokens.forEach(t=>{
+    if(isValue(t)){out.push(t);prev='value';return}
+    let op=t.op;
+    if(op==='('){stack.push(op);prev='left';return}
+    if(op===')'){while(stack.length&&stack[stack.length-1]!=='(')out.push({type:'op',op:stack.pop()});if(!stack.length)throw Error('Missing (');stack.pop();prev='value';return}
+    if(op==='-'&&(prev==='start'||prev==='operator'||prev==='left'))op='u-';
+    if(op==='%'){out.push({type:'op',op});prev='value';return}
+    while(stack.length&&stack[stack.length-1]!=='('&&((right[op]?prec[op]<prec[stack[stack.length-1]]:prec[op]<=prec[stack[stack.length-1]])))out.push({type:'op',op:stack.pop()});
+    stack.push(op);prev='operator';
+  });
+  while(stack.length){let o=stack.pop();if(o==='(')throw Error('Missing )');out.push({type:'op',op:o})}
+  return out;
+}
+function evalTokens(tokens){
+  const st=[];toRpn(tokens).forEach(t=>{
+    if(isValue(t)){st.push(copy(t.v));return}
+    if(t.op==='u-'||t.op==='%'){if(!st.length)throw Error('Missing value');st.push(applyUnary(st.pop(),t.op));return}
+    if(st.length<2)throw Error('Missing value');let b=st.pop(),a=st.pop();st.push(applyBinary(a,t.op,b));
+  });
+  if(st.length!==1)throw Error('Incomplete expression');return st[0];
+}
+function evaluate(raw){return evalTokens(tokenize(raw))}
+function findRepeat(raw){
+  const ts=tokenize(raw);let depth=0,best=-1,prev='start';
+  for(let i=0;i<ts.length;i++){
+    let t=ts[i];if(isValue(t)){prev='value';continue}let o=t.op;if(o==='('){depth++;prev='left';continue}if(o===')'){depth--;prev='value';continue}
+    let unary=o==='-'&&(prev==='start'||prev==='operator'||prev==='left');
+    if(depth===0&&!unary&&'+-*/^'.includes(o))best=i;
+    prev=o==='%'?'value':'operator';
+  }
+  if(best<0)return null;
+  let rhs=ts.slice(best+1);if(!rhs.length)return null;
+  try{return {op:ts[best].op,rhs:evalTokens(rhs)}}catch(e){return null}
+}
+
+function render(preview=true){
+  $('expr').textContent=expr?displayExprText(expr):(repeatLine||' ');
+  if(justCalculated&&lastValue){$('result').textContent=formatValue(lastValue);$('detail').textContent=detailValue(lastValue);return}
+  if(preview&&expr.trim()){
+    try{let v=evaluate(expr);$('result').textContent=formatValue(v);$('detail').textContent=detailValue(v);return}catch(e){}
+  }
+  if(lastValue){$('result').textContent=formatValue(lastValue);$('detail').textContent=detailValue(lastValue)}else{$('result').textContent='0';$('detail').textContent='Clock times + durations + normal math'}
+}
+function resetFresh(){expr='';justCalculated=false;repeatLine=''}
+function endsOperator(){return /[+\-*/^]\s*$/.test(expr.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-'))}
+function addRaw(s){expr+=s;render()}
+function appendDigit(k){if(justCalculated)resetFresh();repeatLine='';expr+=k;render()}
+function appendOperator(sym){
+  let op=sym==='×'?'*':sym==='÷'?'/':sym==='−'?'-':sym;
+  if(justCalculated&&lastValue){expr='ANS '+op+' ';justCalculated=false;repeatLine='';render();return}
+  if(!expr.trim()&&lastValue){expr='ANS '+op+' ';render();return}
+  if(!expr.trim()&&op==='-'){expr='-';render();return}
+  if(endsOperator()){expr=expr.replace(/[+\-*/^]\s*$/,op+' ')}else expr+=' '+op+' ';
+  render(false);
+}
+function appendUnit(u){if(justCalculated)resetFresh();repeatLine='';if(expr&&!/\s$/.test(expr))expr+=' ';expr+=u+' ';render()}
+function appendAmPm(ap){if(justCalculated)resetFresh();repeatLine='';expr=expr.replace(/\s*(AM|PM)\s*$/i,'');if(expr&&!/\s$/.test(expr))expr+=' ';expr+=ap+' ';render()}
+function appendNow(){
+  if(justCalculated)resetFresh();repeatLine='';let d=new Date(),h=d.getHours(),ap=h>=12?'PM':'AM',hh=h%12||12;
+  if(expr&&!/[\s(]$/.test(expr))expr+=' ';
+  expr+=`${hh}:${pad2(d.getMinutes())} ${ap}`;render();
+}
+function paren(){if(justCalculated)resetFresh();repeatLine='';let opens=(expr.match(/\(/g)||[]).length,closes=(expr.match(/\)/g)||[]).length;if(opens>closes&&!endsOperator()&&expr.trim())expr+=')';else{if(expr&&!/[\s(]$/.test(expr)&&!endsOperator())expr+=' * ';expr+='('}render()}
+function sign(){
+  if(justCalculated&&lastValue){lastValue=value(lastValue.kind,-lastValue.value);repeatLine='';render();return}
+  if(!expr.trim()){expr='-';render();return}
+  expr='-('+expr+')';render();
+}
+function back(){
+  if(justCalculated){resetFresh();render();return}
+  expr=expr.trimEnd();
+  let m=expr.match(/(AM|PM|hr|min|sec)$/i);if(m)expr=expr.slice(0,m.index).trimEnd();else expr=expr.slice(0,-1);
+  render();
+}
+function clearAll(){expr='';lastValue=null;lastRepeat=null;justCalculated=false;repeatLine='';render(false)}
+function equals(){
+  if(justCalculated&&lastRepeat&&lastValue){
+    try{let before=copy(lastValue);lastValue=applyBinary(lastValue,lastRepeat.op,copy(lastRepeat.rhs));repeatLine=`${formatValue(before)} ${opSymbol(lastRepeat.op)} ${formatValue(lastRepeat.rhs)}`;expr='';render(false);return}catch(e){toast(e.message);return}
+  }
+  if(!expr.trim())return;
+  try{let v=evaluate(expr),r=findRepeat(expr);repeatLine=displayExprText(expr);lastValue=v;lastRepeat=r;expr='';justCalculated=true;render(false)}catch(e){toast(e.message)}
+}
+function percent(){if(justCalculated)resetFresh();expr+='%';render()}
+function handle(k){
+  if(/^\d$/.test(k)||k==='.')return appendDigit(k);
+  if(['+','−','×','÷','-','*','/','^'].includes(k))return appendOperator(k);
+  if(k==='C')return clearAll();if(k==='BACK')return back();if(k==='=')return equals();if(k==='PAREN')return paren();if(k==='SIGN')return sign();if(k==='%')return percent();
+  if(k==='NOW')return appendNow();if(k===':'){if(justCalculated)resetFresh();return addRaw(':')}if(k==='AM'||k==='PM')return appendAmPm(k);if(k==='hr'||k==='min'||k==='sec')return appendUnit(k);
+}
+
+document.querySelectorAll('[data-k]').forEach(b=>b.addEventListener('click',()=>handle(b.dataset.k)));
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'||e.key==='='){e.preventDefault();equals();return}
+  if(e.key==='Backspace'){e.preventDefault();back();return}
+  if(e.key==='Escape'||e.key==='Delete'){e.preventDefault();clearAll();return}
+  if(/^[0-9.]$/.test(e.key)){e.preventDefault();appendDigit(e.key);return}
+  if(e.key===':'){e.preventDefault();handle(':');return}
+  if(['+','-','*','/','%','^','(',')'].includes(e.key)){
+    e.preventDefault();if(e.key==='('){if(justCalculated)resetFresh();expr+='(';render();}else if(e.key===')'){if(justCalculated)return;expr+=')';render();}else if(e.key==='%')percent();else appendOperator(e.key);return;
+  }
+});
+render(false);
+})();
+</script>
+</body>
+</html>
