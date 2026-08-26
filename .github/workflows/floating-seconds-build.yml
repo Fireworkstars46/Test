@@ -12,15 +12,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Decode project
+      - name: Restore and patch project
         run: |
+          git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
           python3 - <<'PY'
           import base64, pathlib
-          src = pathlib.Path('floating-seconds-project.zip.b64').read_text().strip()
+          src = pathlib.Path('original-project.b64').read_text().strip()
           pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
           PY
           unzip -q floating-seconds-project.zip
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift')
+          s = p.read_text()
+          old = 'func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completionHandler: @escaping () -> Void) {\n        completionHandler()\n    }'
+          new = 'func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completion: @escaping () -> Void) {\n        completion()\n    }'
+          if old not in s:
+              raise SystemExit('Expected PiP delegate code was not found')
+          p.write_text(s.replace(old, new))
+          PY
 
       - name: Install XcodeGen
         run: brew install xcodegen
