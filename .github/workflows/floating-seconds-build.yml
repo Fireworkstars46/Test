@@ -1,0 +1,60 @@
+name: Build Floating Seconds IPA
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode project
+        run: |
+          python3 - <<'PY'
+          import base64, pathlib
+          src = pathlib.Path('floating-seconds-project.zip.b64').read_text().strip()
+          pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
+          PY
+          unzip -q floating-seconds-project.zip
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodegen generate
+
+      - name: Build unsigned iPhone app
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          xcodebuild \
+            -project FloatingSeconds.xcodeproj \
+            -scheme FloatingSeconds \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            clean build
+
+      - name: Package IPA
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          rm -rf Payload FloatingSeconds.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/FloatingSeconds.app Payload/
+          zip -qry FloatingSeconds.ipa Payload
+          test -f FloatingSeconds.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-IPA
+          path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
+          if-no-files-found: error
