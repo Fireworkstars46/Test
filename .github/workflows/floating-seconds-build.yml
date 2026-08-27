@@ -19,12 +19,14 @@ jobs:
         run: |
           git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
           python3 - <<'PY'
-          import base64, pathlib
+          import base64, gzip, pathlib
           src = pathlib.Path('original-project.b64').read_text().strip()
           pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
+          patched = base64.b64decode(pathlib.Path('pipmanager.swift.gz.b64').read_text().strip())
+          pathlib.Path('PiPClockManager.swift').write_bytes(gzip.decompress(patched))
           PY
           unzip -q floating-seconds-project.zip
-          base64 --decode pipmanager.swift.gz.b64 | gzip -dc > FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
           python3 - <<'PY'
           from pathlib import Path
           p = Path('FloatingSecondsBuildPayload/project.yml')
