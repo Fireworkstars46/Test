@@ -1,0 +1,34 @@
+name: Export Floating Seconds Source
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore working source
+        run: |
+          git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
+          python3 - <<'PY'
+          import base64, pathlib
+          src = pathlib.Path('original-project.b64').read_text().strip()
+          pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
+          PY
+          unzip -q floating-seconds-project.zip
+          base64 --decode pipmanager.swift.gz.b64 | gzip -dc > FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-Working-Source
+          path: FloatingSecondsBuildPayload
+          if-no-files-found: error
