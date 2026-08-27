@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore project and apply PiP fix
+      - name: Restore working project and apply v1.2 sizing
         run: |
           git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
           python3 - <<'PY'
@@ -27,12 +27,15 @@ jobs:
           PY
           unzip -q floating-seconds-project.zip
           cp PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp floating-seconds-v1.2/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
+          cp floating-seconds-v1.2/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp floating-seconds-v1.2/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
           python3 - <<'PY'
           from pathlib import Path
           p = Path('FloatingSecondsBuildPayload/project.yml')
           s = p.read_text()
-          s = s.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "1.1"')
-          s = s.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "2"')
+          s = s.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "1.2"')
+          s = s.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "3"')
           p.write_text(s)
           PY
 
@@ -69,6 +72,6 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: FloatingSeconds-IPA-v1.1
+          name: FloatingSeconds-IPA-v1.2
           path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
           if-no-files-found: error
