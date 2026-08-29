@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore project and apply v1.8 button fix
+      - name: Restore project and apply v1.9 drag and external controls
         run: |
           git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
           python3 - <<'PY'
@@ -29,15 +29,17 @@ jobs:
           mkdir -p v17
           unzip -q floating-seconds-v1.7-patch.zip -d v17
           cp v17/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
-          cp floating-seconds-v1.8/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp floating-seconds-v1.9/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
           cp v17/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
           cp v17/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp floating-seconds-v1.9/FloatingSecondsApp.swift FloatingSecondsBuildPayload/FloatingSeconds/FloatingSecondsApp.swift
+          cp floating-seconds-v1.9/Info.plist FloatingSecondsBuildPayload/FloatingSeconds/Info.plist
           python3 - <<'PY'
           from pathlib import Path
           p = Path('FloatingSecondsBuildPayload/project.yml')
           s = p.read_text()
-          s = s.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "1.8"')
-          s = s.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "9"')
+          s = s.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "1.9"')
+          s = s.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "10"')
           p.write_text(s)
           PY
 
@@ -74,6 +76,6 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: FloatingSeconds-IPA-v1.8
+          name: FloatingSeconds-IPA-v1.9
           path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
           if-no-files-found: error
