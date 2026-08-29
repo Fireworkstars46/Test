@@ -1,0 +1,29 @@
+name: Export v1.5 Patch Source
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Decode v1.5 patch
+        run: |
+          python3 - <<'PY'
+          import base64, pathlib
+          p = pathlib.Path('floating-seconds-v1.5-patch.zip.b64')
+          pathlib.Path('v15.zip').write_bytes(base64.b64decode(p.read_text().strip()))
+          PY
+          mkdir -p v15-patch
+          unzip -q v15.zip -d v15-patch
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-v1.5-Patch-Source
+          path: v15-patch
+          if-no-files-found: error
