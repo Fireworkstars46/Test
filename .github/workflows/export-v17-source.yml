@@ -1,0 +1,22 @@
+name: Export v1.7 Source
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode v1.7 source
+        run: |
+          base64 -d floating-seconds-v1.7-patch.zip.b64 > FloatingSeconds-v1.7-source.zip
+          mkdir source
+          unzip -q FloatingSeconds-v1.7-source.zip -d source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-v1.7-Source
+          path: source
