@@ -22,16 +22,16 @@ jobs:
           import base64, pathlib
           src = pathlib.Path('original-project.b64').read_text().strip()
           pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
-          patch = base64.b64decode(pathlib.Path('floating-seconds-v1.6-patch.zip.b64').read_text().strip())
-          pathlib.Path('floating-seconds-v1.6-patch.zip').write_bytes(patch)
+          v15 = pathlib.Path('floating-seconds-v1.5-patch.zip.b64').read_text().strip()
+          pathlib.Path('floating-seconds-v1.5-patch.zip').write_bytes(base64.b64decode(v15))
           PY
           unzip -q floating-seconds-project.zip
-          mkdir -p v16
-          unzip -q floating-seconds-v1.6-patch.zip -d v16
-          cp v16/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
-          cp v16/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
-          cp v16/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
-          cp v16/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          mkdir -p v15
+          unzip -q floating-seconds-v1.5-patch.zip -d v15
+          cp floating-seconds-v1.6/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
+          cp floating-seconds-v1.6/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp floating-seconds-v1.6/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
+          cp v15/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
           python3 - <<'PY'
           from pathlib import Path
           p = Path('FloatingSecondsBuildPayload/project.yml')
