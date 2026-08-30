@@ -1,0 +1,208 @@
+name: Build Floating Seconds Camouflage IPA
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  camouflage-build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore working app and add camouflage controls
+        run: |
+          git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
+          python3 - <<'PY'
+          import base64, pathlib
+          src = pathlib.Path('original-project.b64').read_text().strip()
+          pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
+          patch17 = pathlib.Path('floating-seconds-v1.7-patch.zip.b64').read_text().strip()
+          pathlib.Path('floating-seconds-v1.7-patch.zip').write_bytes(base64.b64decode(patch17))
+          PY
+          unzip -q floating-seconds-project.zip
+          mkdir -p v17
+          unzip -q floating-seconds-v1.7-patch.zip -d v17
+          cp v17/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
+          cp floating-seconds-v1.9/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp v17/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
+          cp v17/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp floating-seconds-v1.9/FloatingSecondsApp.swift FloatingSecondsBuildPayload/FloatingSeconds/FloatingSecondsApp.swift
+          cp floating-seconds-v1.9/Info.plist FloatingSecondsBuildPayload/FloatingSeconds/Info.plist
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('FloatingSecondsBuildPayload/FloatingSeconds')
+
+          settings = root.joinpath('SettingsStore.swift')
+          s = settings.read_text()
+          s = s.replace(
+              '        static let clockX = "secondsOnlyClockX"\n',
+              '        static let clockX = "secondsOnlyClockX"\n'
+              '        static let backgroundMode = "secondsOnlyBackgroundMode"\n'
+              '        static let backgroundBrightness = "secondsOnlyBackgroundBrightness"\n'
+              '        static let backgroundOpacity = "secondsOnlyBackgroundOpacity"\n'
+          )
+          s = s.replace(
+              '    @Published var clockX: Double { didSet { save(clockX, Key.clockX) } }\n',
+              '    @Published var clockX: Double { didSet { save(clockX, Key.clockX) } }\n'
+              '    @Published var backgroundMode: ClockBackground { didSet { save(backgroundMode.rawValue, Key.backgroundMode) } }\n'
+              '    @Published var backgroundBrightness: Double { didSet { save(backgroundBrightness, Key.backgroundBrightness) } }\n'
+              '    @Published var backgroundOpacity: Double { didSet { save(backgroundOpacity, Key.backgroundOpacity) } }\n'
+          )
+          s = s.replace(
+              '        clockX = defaults.object(forKey: Key.clockX) as? Double ?? 0.0\n',
+              '        clockX = defaults.object(forKey: Key.clockX) as? Double ?? 0.0\n'
+              '        backgroundMode = ClockBackground(rawValue: defaults.string(forKey: Key.backgroundMode) ?? "white") ?? .white\n'
+              '        backgroundBrightness = defaults.object(forKey: Key.backgroundBrightness) as? Double ?? 0.95\n'
+              '        backgroundOpacity = defaults.object(forKey: Key.backgroundOpacity) as? Double ?? 1.0\n'
+          )
+          s += r'''
+
+enum ClockBackground: String, CaseIterable, Identifiable {
+    case transparent, white, lightGray, gray, darkGray, black, customGray
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .transparent: return "Transparent (iOS may show black)"
+        case .white: return "White"
+        case .lightGray: return "Light gray"
+        case .gray: return "Gray"
+        case .darkGray: return "Dark gray"
+        case .black: return "Black"
+        case .customGray: return "Custom gray"
+        }
+    }
+    func uiColor(customBrightness: Double, opacity: Double) -> UIColor {
+        let a = CGFloat(max(0.0, min(1.0, opacity)))
+        switch self {
+        case .transparent: return .clear
+        case .white: return UIColor(white: 1.0, alpha: a)
+        case .lightGray: return UIColor(white: 0.85, alpha: a)
+        case .gray: return UIColor(white: 0.55, alpha: a)
+        case .darkGray: return UIColor(white: 0.22, alpha: a)
+        case .black: return UIColor(white: 0.0, alpha: a)
+        case .customGray: return UIColor(white: CGFloat(max(0.0, min(1.0, customBrightness))), alpha: a)
+        }
+    }
+    func swiftUIColor(customBrightness: Double, opacity: Double) -> Color {
+        Color(uiColor(customBrightness: customBrightness, opacity: opacity))
+    }
+}
+'''
+          settings.write_text(s)
+
+          renderer = root.joinpath('ClockRenderer.swift')
+          r = renderer.read_text()
+          r = r.replace(
+              '        context.clear(canvasRect)\n',
+              '''        context.clear(canvasRect)\n\n        let background = settings.backgroundMode.uiColor(customBrightness: settings.backgroundBrightness, opacity: settings.backgroundOpacity)\n        if background.cgColor.alpha > 0 {\n            context.setFillColor(background.cgColor)\n            context.fill(canvasRect)\n        }\n'''
+          )
+          renderer.write_text(r)
+
+          content = root.joinpath('ContentView.swift')
+          c = content.read_text()
+          marker = '                Section("Size") {'
+          camouflage = r'''                Section("Camouflage background") {
+                    Picker("Background", selection: Binding(
+                        get: { settings.backgroundMode },
+                        set: { value in settings.backgroundMode = value; refreshClock() }
+                    )) {
+                        ForEach(ClockBackground.allCases) { background in
+                            Text(background.title).tag(background)
+                        }
+                    }
+
+                    if settings.backgroundMode == .customGray {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Custom brightness")
+                                Spacer()
+                                Text("\(Int(settings.backgroundBrightness * 100))%")
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(value: Binding(
+                                get: { settings.backgroundBrightness },
+                                set: { value in settings.backgroundBrightness = value; refreshClock() }
+                            ), in: 0...1, step: 0.01)
+                        }
+                    }
+
+                    if settings.backgroundMode != .transparent {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Background opacity")
+                                Spacer()
+                                Text("\(Int(settings.backgroundOpacity * 100))%")
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(value: Binding(
+                                get: { settings.backgroundOpacity },
+                                set: { value in settings.backgroundOpacity = value; refreshClock() }
+                            ), in: 0.05...1.0, step: 0.01)
+                        }
+                    }
+
+                    Text("White is best for Walmart/Safari light pages; Black for dark apps. Custom gray and opacity let you tune the match. iOS may still leave a rounded edge or shadow around the PiP window.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+'''
+          c = c.replace(marker, camouflage + marker)
+          c = c.replace(
+              '''                    HStack {
+                        Text("Background")
+                        Spacer()
+                        Text("Transparent")
+                            .foregroundColor(.secondary)
+                    }
+''',
+              '''                    HStack {
+                        Text("Background")
+                        Spacer()
+                        Text(settings.backgroundMode.title)
+                            .foregroundColor(.secondary)
+                    }
+'''
+          )
+          content.write_text(c)
+
+          project = Path('FloatingSecondsBuildPayload/project.yml')
+          p = project.read_text()
+          p = p.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "2.0"')
+          p = p.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "11"')
+          project.write_text(p)
+          PY
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodegen generate
+
+      - name: Build unsigned iPhone app
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodebuild -project FloatingSeconds.xcodeproj -scheme FloatingSeconds -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' clean build
+
+      - name: Package IPA
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          rm -rf Payload FloatingSeconds.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/FloatingSeconds.app Payload/
+          zip -qry FloatingSeconds.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-IPA-Camouflage-v2.0
+          path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
+          if-no-files-found: error
