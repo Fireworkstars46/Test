@@ -1,0 +1,75 @@
+name: Build Floating Seconds v2.0 IPA
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  build-v20:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore project and apply v2.0 camouflage controls
+        run: |
+          git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
+          python3 - <<'PY'
+          import base64, pathlib
+          src = pathlib.Path('original-project.b64').read_text().strip()
+          pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(src))
+          patch17 = pathlib.Path('floating-seconds-v1.7-patch.zip.b64').read_text().strip()
+          pathlib.Path('floating-seconds-v1.7-patch.zip').write_bytes(base64.b64decode(patch17))
+          patch20 = pathlib.Path('floating-seconds-v2.0-patch.zip.b64').read_text().strip()
+          pathlib.Path('floating-seconds-v2.0-patch.zip').write_bytes(base64.b64decode(patch20))
+          PY
+          unzip -q floating-seconds-project.zip
+          mkdir -p v17 v20
+          unzip -q floating-seconds-v1.7-patch.zip -d v17
+          unzip -q floating-seconds-v2.0-patch.zip -d v20
+          cp v20/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
+          cp v20/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp v20/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
+          cp v17/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp floating-seconds-v1.9/FloatingSecondsApp.swift FloatingSecondsBuildPayload/FloatingSeconds/FloatingSecondsApp.swift
+          cp floating-seconds-v1.9/Info.plist FloatingSecondsBuildPayload/FloatingSeconds/Info.plist
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('FloatingSecondsBuildPayload/project.yml')
+          s = p.read_text()
+          s = s.replace('MARKETING_VERSION: "1.0"', 'MARKETING_VERSION: "2.0"')
+          s = s.replace('CURRENT_PROJECT_VERSION: "1"', 'CURRENT_PROJECT_VERSION: "11"')
+          p.write_text(s)
+          PY
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodegen generate
+
+      - name: Build unsigned iPhone app
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          xcodebuild -project FloatingSeconds.xcodeproj -scheme FloatingSeconds -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' clean build
+
+      - name: Package IPA
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          rm -rf Payload FloatingSeconds.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/FloatingSeconds.app Payload/
+          zip -qry FloatingSeconds.ipa Payload
+          test -f FloatingSeconds.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-IPA-v2.0
+          path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
+          if-no-files-found: error
