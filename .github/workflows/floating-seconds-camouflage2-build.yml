@@ -1,4 +1,4 @@
-name: Build Floating Seconds Camouflage 2 IPA
+name: Build Floating Seconds Camouflage v2.1 IPA
 
 on:
   push:
@@ -48,6 +48,6 @@ jobs:
           zip -qry FloatingSeconds.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: FloatingSeconds-IPA-Camouflage-v2.0
+          name: FloatingSeconds-IPA-Camouflage-v2.1
           path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
           if-no-files-found: error
