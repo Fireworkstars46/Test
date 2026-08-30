@@ -45,12 +45,29 @@ jobs:
         working-directory: FloatingSecondsBuildPayload
         run: xcodebuild -project FloatingSeconds.xcodeproj -scheme FloatingSeconds -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' clean build
 
+      - name: Fix ReplayKit extension metadata
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          PLIST="build/Build/Products/Release-iphoneos/FloatingSeconds.app/PlugIns/FloatingSecondsAutoMatch.appex/Info.plist"
+          test -f "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :NSExtension" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSExtension dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSExtension:NSExtensionPointIdentifier string com.apple.broadcast-services-upload" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSExtension:NSExtensionPrincipalClass string FloatingSecondsAutoMatch.SampleHandler" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Floating Seconds Auto Match" "$PLIST"
+          plutil -lint "$PLIST"
+          plutil -p "$PLIST"
+
       - name: Verify broadcast extension
         working-directory: FloatingSecondsBuildPayload
         run: |
-          echo "Embedded extensions:"
-          find build/Build/Products/Release-iphoneos/FloatingSeconds.app -maxdepth 3 -type d -name '*.appex' -print
-          test -n "$(find build/Build/Products/Release-iphoneos/FloatingSeconds.app -maxdepth 3 -type d -name '*.appex' -print -quit)"
+          APPEX="build/Build/Products/Release-iphoneos/FloatingSeconds.app/PlugIns/FloatingSecondsAutoMatch.appex"
+          PLIST="$APPEX/Info.plist"
+          test -d "$APPEX"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$PLIST")" = "com.apple.broadcast-services-upload"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$PLIST")" = "FloatingSecondsAutoMatch.SampleHandler"
+          echo "ReplayKit extension metadata verified."
 
       - name: Package
         working-directory: FloatingSecondsBuildPayload
@@ -62,6 +79,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FloatingSeconds-IPA-AutoMatch-v2.2
+          name: FloatingSeconds-IPA-AutoMatch-v2.2-Fixed
           path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
           if-no-files-found: error
