@@ -1,0 +1,67 @@
+name: Build Floating Seconds Auto Match v2.2 IPA
+
+on:
+  push:
+    branches:
+      - floating-seconds-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore working source
+        run: |
+          git show 7d9934ac5f86c60e0e256c4016e992af48e9619b:floating-seconds-project.zip.b64 > original-project.b64
+          python3 - <<'PY'
+          import base64, pathlib
+          pathlib.Path('floating-seconds-project.zip').write_bytes(base64.b64decode(pathlib.Path('original-project.b64').read_text().strip()))
+          pathlib.Path('floating-seconds-v1.7-patch.zip').write_bytes(base64.b64decode(pathlib.Path('floating-seconds-v1.7-patch.zip.b64').read_text().strip()))
+          PY
+          unzip -q floating-seconds-project.zip
+          mkdir -p v17
+          unzip -q floating-seconds-v1.7-patch.zip -d v17
+          cp v17/SettingsStore.swift FloatingSecondsBuildPayload/FloatingSeconds/SettingsStore.swift
+          cp floating-seconds-v1.9/ContentView.swift FloatingSecondsBuildPayload/FloatingSeconds/ContentView.swift
+          cp v17/ClockRenderer.swift FloatingSecondsBuildPayload/FloatingSeconds/ClockRenderer.swift
+          cp v17/PiPClockManager.swift FloatingSecondsBuildPayload/FloatingSeconds/PiPClockManager.swift
+          cp floating-seconds-v1.9/FloatingSecondsApp.swift FloatingSecondsBuildPayload/FloatingSeconds/FloatingSecondsApp.swift
+          cp floating-seconds-v1.9/Info.plist FloatingSecondsBuildPayload/FloatingSeconds/Info.plist
+          python3 floating-seconds-camouflage-patch.py
+          python3 floating-seconds-auto-match-v22-patch.py
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodegen generate
+
+      - name: Build
+        working-directory: FloatingSecondsBuildPayload
+        run: xcodebuild -project FloatingSeconds.xcodeproj -scheme FloatingSeconds -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' clean build
+
+      - name: Verify broadcast extension
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          echo "Embedded extensions:"
+          find build/Build/Products/Release-iphoneos/FloatingSeconds.app -maxdepth 3 -type d -name '*.appex' -print
+          test -n "$(find build/Build/Products/Release-iphoneos/FloatingSeconds.app -maxdepth 3 -type d -name '*.appex' -print -quit)"
+
+      - name: Package
+        working-directory: FloatingSecondsBuildPayload
+        run: |
+          rm -rf Payload FloatingSeconds.ipa
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/FloatingSeconds.app Payload/
+          zip -qry FloatingSeconds.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FloatingSeconds-IPA-AutoMatch-v2.2
+          path: FloatingSecondsBuildPayload/FloatingSeconds.ipa
+          if-no-files-found: error
