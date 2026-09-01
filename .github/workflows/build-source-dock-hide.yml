@@ -27,6 +27,10 @@ jobs:
         working-directory: obs-source-dock-hide
         run: |
           Copy-Item "src/plugin-main.cpp" "_obs_template/src/plugin-main.cpp" -Force
+          $pluginPath = "_obs_template/src/plugin-main.cpp"
+          $plugin = Get-Content $pluginPath -Raw
+          $plugin = $plugin.Replace("QABstractItemModel", "QAbstractItemModel")
+          Set-Content $pluginPath $plugin -Encoding utf8
 
           $cmakePath = "_obs_template/CMakeLists.txt"
           $cmake = Get-Content $cmakePath -Raw
