@@ -13,7 +13,6 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 DefaultDirName={code:GetObsInstallDir}
-; Keep the normal destination-folder page visible so installation feels like a standard app wizard.
 DisableWelcomePage=no
 DisableDirPage=no
 DisableProgramGroupPage=yes
@@ -44,11 +43,10 @@ VersionInfoProductVersion=0.4.0
 VersionInfoCopyright=Community plugin; not affiliated with OBS Project
 
 [Files]
-; The build workflow stages only this plugin's OBS install tree here.
-Source: "..\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Install the compiled 64-bit plugin into OBS's normal Windows plugin folder.
+Source: "..\stage\source-dock-hide\bin\64bit\source-dock-hide.dll"; DestDir: "{app}\obs-plugins\64bit"; Flags: ignoreversion
 
 [Run]
-; Standard optional Finish-page action. Nothing is downloaded or run during installation.
 Filename: "{app}\bin\64bit\obs64.exe"; Description: "Launch OBS Studio"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
@@ -58,7 +56,6 @@ var
 begin
   Path := '';
 
-  { OBS writes its install root as the default value of HKLM\SOFTWARE\OBS Studio. }
   if IsWin64 then
     RegQueryStringValue(HKLM64, 'SOFTWARE\OBS Studio', '', Path);
 
