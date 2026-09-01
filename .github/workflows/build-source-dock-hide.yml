@@ -16,87 +16,174 @@ jobs:
       - name: Checkout Source Dock Hide
         uses: actions/checkout@v4
 
-      - name: Patch v0.5 bottom-toolbar placement
+      - name: Patch v0.6 source context menu and bottom counter
         shell: pwsh
         working-directory: obs-source-dock-hide
         run: |
           $pluginPath = "src/plugin-main.cpp"
           $plugin = Get-Content $pluginPath -Raw
           $plugin = $plugin.Replace("QABstractItemModel", "QAbstractItemModel")
-          $plugin = $plugin.Replace('#include <QToolButton>', "#include <QToolBar>`r`n#include <QToolButton>")
-          $plugin = $plugin.Replace('static constexpr const char *PLUGIN_VERSION = "0.4.0";', 'static constexpr const char *PLUGIN_VERSION = "0.5.0";')
+          $plugin = $plugin.Replace('#include <QToolButton>', "#include <QEvent>`r`n#include <QToolBar>`r`n#include <QToolButton>")
+          $plugin = $plugin.Replace('static constexpr const char *PLUGIN_VERSION = "0.4.0";', 'static constexpr const char *PLUGIN_VERSION = "0.6.0";')
 
+          # Install a Qt event filter so we can add an action to OBS's existing source context menu.
+          $plugin = $plugin.Replace(
+              '        obs_frontend_add_event_callback(&SourceDockHideController::FrontendEvent, this);',
+              "        obs_frontend_add_event_callback(&SourceDockHideController::FrontendEvent, this);`r`n        if (qApp)`r`n            qApp->installEventFilter(this);")
+          $plugin = $plugin.Replace(
+              '        obs_frontend_remove_event_callback(&SourceDockHideController::FrontendEvent, this);',
+              "        if (qApp)`r`n            qApp->removeEventFilter(this);`r`n        obs_frontend_remove_event_callback(&SourceDockHideController::FrontendEvent, this);")
+
+          # Replace v0.4's heuristic placement with OBS's real Sources toolbar.
           $startMarker = '    QBoxLayout *FindSourcesButtonLayout(QDockWidget *sourcesDock) const'
           $endMarker = '    QString ItemName(const QModelIndex &index) const'
           $start = $plugin.IndexOf($startMarker)
           $end = $plugin.IndexOf($endMarker, $start)
           if ($start -lt 0 -or $end -lt 0) { throw "Could not locate old toolbar-placement block." }
 
-          $replacement = @'
-          void EnsureHiddenCountButton()
-          {
-          if (!sourceTree_)
-          return;
+          $toolbarReplacement = @'
+    void EnsureHiddenCountButton()
+    {
+        if (!sourceTree_)
+            return;
 
-          auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
-          if (!mainWindow)
-          return;
+        auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+        if (!mainWindow)
+            return;
 
-          QToolBar *sourcesToolbar = mainWindow->findChild<QToolBar *>("sourcesToolbar");
-          if (!sourcesToolbar) {
-          if (auto *sourcesDock = mainWindow->findChild<QDockWidget *>("sourcesDock"))
-          sourcesToolbar = sourcesDock->findChild<QToolBar *>("sourcesToolbar");
-          }
-          if (!sourcesToolbar)
-          return;
+        QToolBar *sourcesToolbar = mainWindow->findChild<QToolBar *>("sourcesToolbar");
+        if (!sourcesToolbar) {
+            if (auto *sourcesDock = mainWindow->findChild<QDockWidget *>("sourcesDock"))
+                sourcesToolbar = sourcesDock->findChild<QToolBar *>("sourcesToolbar");
+        }
+        if (!sourcesToolbar)
+            return;
 
-          if (!hiddenCountButton_) {
-          hiddenCountButton_ = new QToolButton(sourcesToolbar);
-          hiddenCountButton_->setObjectName("sourceDockHiddenCountButton");
-          hiddenCountButton_->setText("0 hidden");
-          hiddenCountButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-          hiddenCountButton_->setAutoRaise(true);
-          hiddenCountButton_->setCheckable(true);
-          hiddenCountButton_->setMinimumWidth(72);
-          hiddenCountButton_->setToolTip("0 hidden sources");
-          hiddenCountButton_->setAccessibleName("Show or hide sources hidden from the Sources list");
-          hiddenCountButton_->setContextMenuPolicy(Qt::CustomContextMenu);
+        if (!hiddenCountButton_) {
+            hiddenCountButton_ = new QToolButton(sourcesToolbar);
+            hiddenCountButton_->setObjectName("sourceDockHiddenCountButton");
+            hiddenCountButton_->setText("0 hidden");
+            hiddenCountButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            hiddenCountButton_->setAutoRaise(true);
+            hiddenCountButton_->setCheckable(true);
+            hiddenCountButton_->setMinimumWidth(72);
+            hiddenCountButton_->setToolTip("0 hidden sources");
+            hiddenCountButton_->setAccessibleName("Show or hide sources hidden from the Sources list");
 
-          QObject::connect(hiddenCountButton_, &QToolButton::clicked, this, [this]() {
-          const int hiddenCount = HiddenCountInCurrentModel();
-          if (hiddenCount <= 0) {
-          showHiddenRows_ = false;
-          UpdateHiddenCountButton();
-          return;
-          }
-          showHiddenRows_ = !showHiddenRows_;
-          ScheduleApply();
-          });
+            QObject::connect(hiddenCountButton_, &QToolButton::clicked, this, [this]() {
+                const int hiddenCount = HiddenCountInCurrentModel();
+                if (hiddenCount <= 0) {
+                    showHiddenRows_ = false;
+                    UpdateHiddenCountButton();
+                    return;
+                }
+                showHiddenRows_ = !showHiddenRows_;
+                ScheduleApply();
+            });
 
-          QObject::connect(hiddenCountButton_, &QWidget::customContextMenuRequested, this,
-          [this](const QPoint &) { ShowHiddenButtonMenu(); });
+            sourcesToolbar->addWidget(hiddenCountButton_);
+        } else if (hiddenCountButton_->parentWidget() != sourcesToolbar) {
+            hiddenCountButton_->deleteLater();
+            hiddenCountButton_.clear();
+            QTimer::singleShot(0, this, [this]() {
+                EnsureHiddenCountButton();
+                UpdateHiddenCountButton();
+            });
+            return;
+        }
 
-          sourcesToolbar->addWidget(hiddenCountButton_);
-          } else if (hiddenCountButton_->parentWidget() != sourcesToolbar) {
-          hiddenCountButton_->deleteLater();
-          hiddenCountButton_.clear();
-          QTimer::singleShot(0, this, [this]() {
-          EnsureHiddenCountButton();
-          UpdateHiddenCountButton();
-          });
-          return;
-          }
+        hiddenCountButton_->show();
+    }
 
-          hiddenCountButton_->show();
-          }
+'@
+          $plugin = $plugin.Substring(0, $start) + $toolbarReplacement + $plugin.Substring($end)
 
-          '@
-          $plugin = $plugin.Substring(0, $start) + $replacement + $plugin.Substring($end)
+          # Add "Hide in Sources" directly to the normal right-click menu, next to "Hide in Mixer".
+          $contextMarker = '    static void FrontendEvent(enum obs_frontend_event event, void *privateData)'
+          $contextPos = $plugin.IndexOf($contextMarker)
+          if ($contextPos -lt 0) { throw "Could not locate FrontendEvent insertion point." }
+
+          $contextCode = @'
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event && event->type() == QEvent::Show) {
+            if (auto *menu = qobject_cast<QMenu *>(watched))
+                MaybeAddSourceContextAction(menu);
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+    void MaybeAddSourceContextAction(QMenu *menu)
+    {
+        if (!menu || !sourceTree_)
+            return;
+
+        const QStringList selected = SelectedNames();
+        if (selected.isEmpty())
+            return;
+
+        const auto actions = menu->actions();
+        int hideMixerIndex = -1;
+        for (int i = 0; i < actions.size(); ++i) {
+            QAction *action = actions.at(i);
+            if (!action)
+                continue;
+
+            if (action->objectName() == QStringLiteral("sourceDockHideContextAction"))
+                return;
+
+            QString text = action->text();
+            text.remove(QLatin1Char('&'));
+            if (text.compare(QStringLiteral("Hide in Mixer"), Qt::CaseInsensitive) == 0) {
+                hideMixerIndex = i;
+                break;
+            }
+        }
+
+        // This keeps the plugin limited to OBS's normal Source context menu.
+        if (hideMixerIndex < 0)
+            return;
+
+        QSet<QString> hidden;
+        for (const QString &name : HiddenNames())
+            hidden.insert(name);
+
+        bool allSelectedAreHidden = true;
+        for (const QString &name : selected) {
+            if (!hidden.contains(name)) {
+                allSelectedAreHidden = false;
+                break;
+            }
+        }
+
+        auto *action = new QAction(allSelectedAreHidden ? QStringLiteral("Unhide from Sources")
+                                                         : QStringLiteral("Hide in Sources"),
+                                   menu);
+        action->setObjectName(QStringLiteral("sourceDockHideContextAction"));
+
+        if (allSelectedAreHidden) {
+            QObject::connect(action, &QAction::triggered, this, [this]() { UnhideSelectedRows(); });
+        } else {
+            QObject::connect(action, &QAction::triggered, this, [this]() { HideSelectedRows(); });
+        }
+
+        QAction *before = (hideMixerIndex + 1 < actions.size()) ? actions.at(hideMixerIndex + 1) : nullptr;
+        menu->insertAction(before, action);
+    }
+
+'@
+          $plugin = $plugin.Substring(0, $contextPos) + $contextCode + $plugin.Substring($contextPos)
+
+          # Update the hidden-counter tooltip now that hiding is done from the source's own menu.
+          $plugin = $plugin.Replace('"0 hidden sources\nRight-click to hide the currently selected source(s)"', '"0 hidden sources"')
+          $plugin = $plugin.Replace('Click to hide them again\nRight-click for options', 'Click to hide them again')
+          $plugin = $plugin.Replace('Click to show them temporarily\nRight-click for options', 'Click to show them temporarily')
+
           Set-Content $pluginPath $plugin -Encoding utf8
 
           $issPath = "installer/SourceDockHide.iss"
           $iss = Get-Content $issPath -Raw
-          $iss = $iss.Replace("0.4.0", "0.5.0")
+          $iss = $iss.Replace("0.4.0", "0.6.0")
           Set-Content $issPath $iss -Encoding utf8
 
       - name: Clone official OBS plugin template
@@ -125,7 +212,7 @@ jobs:
           $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
           $buildspec.name = "source-dock-hide"
           $buildspec.displayName = "Source Dock Hide for OBS"
-          $buildspec.version = "0.5.0"
+          $buildspec.version = "0.6.0"
           $buildspec.author = "Source Dock Hide community plugin"
           $buildspec.website = "https://obsproject.com/"
           $buildspec.email = "noreply@example.invalid"
@@ -168,7 +255,7 @@ jobs:
         shell: pwsh
         working-directory: obs-source-dock-hide
         run: |
-          $file = Get-Item "dist\Source-Dock-Hide-Setup-0.5.0.exe"
+          $file = Get-Item "dist\Source-Dock-Hide-Setup-0.6.0.exe"
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
@@ -177,6 +264,6 @@ jobs:
         with:
           name: Source-Dock-Hide-Setup-Windows-x64
           path: |
-            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.5.0.exe
-            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.5.0.exe.sha256
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.6.0.exe
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.6.0.exe.sha256
           if-no-files-found: error
