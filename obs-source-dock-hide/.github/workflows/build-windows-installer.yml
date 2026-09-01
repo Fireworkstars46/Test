@@ -1,0 +1,118 @@
+name: Build Windows plugin + installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [obs-source-dock-hide-temp-build]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Source Dock Hide
+        uses: actions/checkout@v4
+
+      - name: Clone official OBS plugin template
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/obsproject/obs-plugintemplate.git _obs_template
+
+      - name: Configure plugin template
+        shell: pwsh
+        run: |
+          Copy-Item "src/plugin-main.cpp" "_obs_template/src/plugin-main.cpp" -Force
+
+          $cmakePath = "_obs_template/CMakeLists.txt"
+          $cmake = Get-Content $cmakePath -Raw
+          $cmake = $cmake.Replace("src/plugin-main.c", "src/plugin-main.cpp")
+          Set-Content $cmakePath $cmake -Encoding utf8
+
+          $presetPath = "_obs_template/CMakePresets.json"
+          $preset = Get-Content $presetPath -Raw
+          $preset = $preset.Replace('"ENABLE_FRONTEND_API": false', '"ENABLE_FRONTEND_API": true')
+          $preset = $preset.Replace('"ENABLE_QT": false', '"ENABLE_QT": true')
+          Set-Content $presetPath $preset -Encoding utf8
+
+          $buildspecPath = "_obs_template/buildspec.json"
+          $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
+          $buildspec.name = "source-dock-hide"
+          $buildspec.displayName = "Source Dock Hide for OBS"
+          $buildspec.version = "0.4.0"
+          $buildspec.author = "Source Dock Hide community plugin"
+          $buildspec.website = "https://obsproject.com/"
+          $buildspec.email = "noreply@example.invalid"
+          $buildspec | ConvertTo-Json -Depth 20 | Set-Content $buildspecPath -Encoding utf8
+
+      - name: Build Windows x64 Release
+        working-directory: _obs_template
+        shell: pwsh
+        env:
+          CI: true
+        run: .\.github\scripts\Build-Windows.ps1 -Target x64 -Configuration Release
+
+      - name: Stage plugin install tree
+        shell: pwsh
+        run: |
+          $releaseRoot = Resolve-Path "_obs_template/release/Release"
+          if (Test-Path "stage") { Remove-Item "stage" -Recurse -Force }
+          New-Item -ItemType Directory -Path "stage" | Out-Null
+          Copy-Item "$releaseRoot\*" "stage\" -Recurse -Force
+
+          $dll = Get-ChildItem "stage" -Recurse -File -Filter "source-dock-hide.dll" | Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "Staged files:"
+            Get-ChildItem "stage" -Recurse | ForEach-Object { Write-Host $_.FullName }
+            throw "source-dock-hide.dll was not found in the OBS template release tree."
+          }
+          Write-Host "Plugin DLL: $($dll.FullName)"
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+          Compress-Archive -Path "stage\*" -DestinationPath "dist\Source-Dock-Hide-0.4.0-Windows-x64.zip" -Force
+
+      - name: Locate or install Inno Setup
+        id: inno
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found." }
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build standard Setup.exe installer
+        shell: pwsh
+        run: '& "${{ steps.inno.outputs.iscc }}" "installer\SourceDockHide.iss"'
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem "dist" -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Source-Dock-Hide-Setup-Windows-x64
+          path: |
+            dist/Source-Dock-Hide-Setup-0.4.0.exe
+            dist/Source-Dock-Hide-Setup-0.4.0.exe.sha256
+          if-no-files-found: error
+
+      - name: Upload portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Source-Dock-Hide-Portable-Windows-x64
+          path: |
+            dist/Source-Dock-Hide-0.4.0-Windows-x64.zip
+            dist/Source-Dock-Hide-0.4.0-Windows-x64.zip.sha256
+          if-no-files-found: error

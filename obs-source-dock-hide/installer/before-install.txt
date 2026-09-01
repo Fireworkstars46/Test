@@ -1,0 +1,7 @@
+Before installing Source Dock Hide:
+
+• Close OBS Studio if it is currently open.
+• The installer only copies this OBS plugin into your OBS Studio folder.
+• It does not install drivers, services, startup programs, browser extensions, or download anything from the internet.
+
+Click Next to choose/confirm your OBS Studio folder and continue.
