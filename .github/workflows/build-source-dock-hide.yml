@@ -19,10 +19,12 @@ jobs:
 
       - name: Clone official OBS plugin template
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: git clone --depth 1 https://github.com/obsproject/obs-plugintemplate.git _obs_template
 
       - name: Configure plugin template
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: |
           Copy-Item "src/plugin-main.cpp" "_obs_template/src/plugin-main.cpp" -Force
 
@@ -48,7 +50,7 @@ jobs:
           $buildspec | ConvertTo-Json -Depth 20 | Set-Content $buildspecPath -Encoding utf8
 
       - name: Build Windows x64 Release
-        working-directory: _obs_template
+        working-directory: obs-source-dock-hide/_obs_template
         shell: pwsh
         env:
           CI: true
@@ -56,6 +58,7 @@ jobs:
 
       - name: Stage plugin install tree
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: |
           $releaseRoot = Resolve-Path "_obs_template/release/Release"
           if (Test-Path "stage") { Remove-Item "stage" -Recurse -Force }
@@ -72,6 +75,7 @@ jobs:
 
       - name: Create portable ZIP
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: |
           New-Item -ItemType Directory -Path "dist" -Force | Out-Null
           Compress-Archive -Path "stage\*" -DestinationPath "dist\Source-Dock-Hide-0.4.0-Windows-x64.zip" -Force
@@ -79,6 +83,7 @@ jobs:
       - name: Locate or install Inno Setup
         id: inno
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
@@ -89,10 +94,12 @@ jobs:
 
       - name: Build standard Setup.exe installer
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: '& "${{ steps.inno.outputs.iscc }}" "installer\SourceDockHide.iss"'
 
       - name: Generate SHA-256 checksums
         shell: pwsh
+        working-directory: obs-source-dock-hide
         run: |
           Get-ChildItem "dist" -File | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -104,8 +111,8 @@ jobs:
         with:
           name: Source-Dock-Hide-Setup-Windows-x64
           path: |
-            dist/Source-Dock-Hide-Setup-0.4.0.exe
-            dist/Source-Dock-Hide-Setup-0.4.0.exe.sha256
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.4.0.exe
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-0.4.0.exe.sha256
           if-no-files-found: error
 
       - name: Upload portable package
@@ -113,6 +120,6 @@ jobs:
         with:
           name: Source-Dock-Hide-Portable-Windows-x64
           path: |
-            dist/Source-Dock-Hide-0.4.0-Windows-x64.zip
-            dist/Source-Dock-Hide-0.4.0-Windows-x64.zip.sha256
+            obs-source-dock-hide/dist/Source-Dock-Hide-0.4.0-Windows-x64.zip
+            obs-source-dock-hide/dist/Source-Dock-Hide-0.4.0-Windows-x64.zip.sha256
           if-no-files-found: error
