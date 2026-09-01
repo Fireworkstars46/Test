@@ -23,7 +23,7 @@ jobs:
           $pluginPath = "src/plugin-main.cpp"
           $plugin = Get-Content $pluginPath -Raw
           $plugin = $plugin.Replace("QABstractItemModel", "QAbstractItemModel")
-          $plugin = $plugin.Replace('#include <QTimer>' + "`n" + '#include <QToolButton>', '#include <QTimer>' + "`n" + '#include <QToolBar>' + "`n" + '#include <QToolButton>')
+          $plugin = $plugin.Replace('#include <QToolButton>', "#include <QToolBar>`r`n#include <QToolButton>")
           $plugin = $plugin.Replace('static constexpr const char *PLUGIN_VERSION = "0.4.0";', 'static constexpr const char *PLUGIN_VERSION = "0.5.0";')
 
           $startMarker = '    QBoxLayout *FindSourcesButtonLayout(QDockWidget *sourcesDock) const'
@@ -33,68 +33,64 @@ jobs:
           if ($start -lt 0 -or $end -lt 0) { throw "Could not locate old toolbar-placement block." }
 
           $replacement = @'
-    void EnsureHiddenCountButton()
-    {
-        if (!sourceTree_)
-            return;
+          void EnsureHiddenCountButton()
+          {
+          if (!sourceTree_)
+          return;
 
-        auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
-        if (!mainWindow)
-            return;
+          auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+          if (!mainWindow)
+          return;
 
-        // Put the counter on OBS's real Sources bottom toolbar.  The old
-        // heuristic could accidentally choose a layout inside a source row.
-        QToolBar *sourcesToolbar = mainWindow->findChild<QToolBar *>("sourcesToolbar");
-        if (!sourcesToolbar) {
-            if (auto *sourcesDock = mainWindow->findChild<QDockWidget *>("sourcesDock"))
-                sourcesToolbar = sourcesDock->findChild<QToolBar *>("sourcesToolbar");
-        }
-        if (!sourcesToolbar)
-            return;
+          QToolBar *sourcesToolbar = mainWindow->findChild<QToolBar *>("sourcesToolbar");
+          if (!sourcesToolbar) {
+          if (auto *sourcesDock = mainWindow->findChild<QDockWidget *>("sourcesDock"))
+          sourcesToolbar = sourcesDock->findChild<QToolBar *>("sourcesToolbar");
+          }
+          if (!sourcesToolbar)
+          return;
 
-        if (!hiddenCountButton_) {
-            hiddenCountButton_ = new QToolButton(sourcesToolbar);
-            hiddenCountButton_->setObjectName("sourceDockHiddenCountButton");
-            hiddenCountButton_->setText("0 hidden");
-            hiddenCountButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
-            hiddenCountButton_->setAutoRaise(true);
-            hiddenCountButton_->setCheckable(true);
-            hiddenCountButton_->setMinimumWidth(72);
-            hiddenCountButton_->setToolTip("0 hidden sources");
-            hiddenCountButton_->setAccessibleName("Show or hide sources hidden from the Sources list");
-            hiddenCountButton_->setContextMenuPolicy(Qt::CustomContextMenu);
+          if (!hiddenCountButton_) {
+          hiddenCountButton_ = new QToolButton(sourcesToolbar);
+          hiddenCountButton_->setObjectName("sourceDockHiddenCountButton");
+          hiddenCountButton_->setText("0 hidden");
+          hiddenCountButton_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+          hiddenCountButton_->setAutoRaise(true);
+          hiddenCountButton_->setCheckable(true);
+          hiddenCountButton_->setMinimumWidth(72);
+          hiddenCountButton_->setToolTip("0 hidden sources");
+          hiddenCountButton_->setAccessibleName("Show or hide sources hidden from the Sources list");
+          hiddenCountButton_->setContextMenuPolicy(Qt::CustomContextMenu);
 
-            QObject::connect(hiddenCountButton_, &QToolButton::clicked, this, [this]() {
-                const int hiddenCount = HiddenCountInCurrentModel();
-                if (hiddenCount <= 0) {
-                    showHiddenRows_ = false;
-                    UpdateHiddenCountButton();
-                    return;
-                }
+          QObject::connect(hiddenCountButton_, &QToolButton::clicked, this, [this]() {
+          const int hiddenCount = HiddenCountInCurrentModel();
+          if (hiddenCount <= 0) {
+          showHiddenRows_ = false;
+          UpdateHiddenCountButton();
+          return;
+          }
+          showHiddenRows_ = !showHiddenRows_;
+          ScheduleApply();
+          });
 
-                showHiddenRows_ = !showHiddenRows_;
-                ScheduleApply();
-            });
+          QObject::connect(hiddenCountButton_, &QWidget::customContextMenuRequested, this,
+          [this](const QPoint &) { ShowHiddenButtonMenu(); });
 
-            QObject::connect(hiddenCountButton_, &QWidget::customContextMenuRequested, this,
-                             [this](const QPoint &) { ShowHiddenButtonMenu(); });
+          sourcesToolbar->addWidget(hiddenCountButton_);
+          } else if (hiddenCountButton_->parentWidget() != sourcesToolbar) {
+          hiddenCountButton_->deleteLater();
+          hiddenCountButton_.clear();
+          QTimer::singleShot(0, this, [this]() {
+          EnsureHiddenCountButton();
+          UpdateHiddenCountButton();
+          });
+          return;
+          }
 
-            // Add it after OBS's normal + / trash / gear / up / down controls.
-            sourcesToolbar->addWidget(hiddenCountButton_);
-        } else if (hiddenCountButton_->parentWidget() != sourcesToolbar) {
-            hiddenCountButton_->deleteLater();
-            hiddenCountButton_.clear();
-            QTimer::singleShot(0, this, [this]() {
-                EnsureHiddenCountButton();
-                UpdateHiddenCountButton();
-            });
-            return;
-        }
+          hiddenCountButton_->show();
+          }
 
-        hiddenCountButton_->show();
-    }
-
-'@
+          '@
           $plugin = $plugin.Substring(0, $start) + $replacement + $plugin.Substring($end)
           Set-Content $pluginPath $plugin -Encoding utf8
 
@@ -150,17 +146,8 @@ jobs:
           if (Test-Path "stage") { Remove-Item "stage" -Recurse -Force }
           New-Item -ItemType Directory -Path "stage" | Out-Null
           Copy-Item "$releaseRoot\*" "stage\" -Recurse -Force
-
           $dll = Get-ChildItem "stage" -Recurse -File -Filter "source-dock-hide.dll" | Select-Object -First 1
           if (-not $dll) { throw "source-dock-hide.dll was not found in the OBS template release tree." }
-          Write-Host "Plugin DLL: $($dll.FullName)"
-
-      - name: Create portable ZIP
-        shell: pwsh
-        working-directory: obs-source-dock-hide
-        run: |
-          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
-          Compress-Archive -Path "stage\*" -DestinationPath "dist\Source-Dock-Hide-0.5.0-Windows-x64.zip" -Force
 
       - name: Locate or install Inno Setup
         id: inno
@@ -177,14 +164,13 @@ jobs:
         working-directory: obs-source-dock-hide
         run: '& "${{ steps.inno.outputs.iscc }}" "installer\SourceDockHide.iss"'
 
-      - name: Generate SHA-256 checksums
+      - name: Generate SHA-256 checksum
         shell: pwsh
         working-directory: obs-source-dock-hide
         run: |
-          Get-ChildItem "dist" -File | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
-          }
+          $file = Get-Item "dist\Source-Dock-Hide-Setup-0.5.0.exe"
+          $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
