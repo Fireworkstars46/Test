@@ -1,5 +1,5 @@
 #define MyAppName "OBS UI Scale"
-#define MyAppVersion "0.6.0"
+#define MyAppVersion "0.7.0"
 #define MyAppPublisher "OBS UI Scale community plugin"
 #define MyAppURL "https://obsproject.com/"
 
@@ -21,7 +21,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
-OutputBaseFilename=OBS-UI-Scale-Setup-0.6.0
+OutputBaseFilename=OBS-UI-Scale-Setup-0.7.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -31,11 +31,11 @@ CreateUninstallRegKey=yes
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=0.6.0.0
+VersionInfoVersion=0.7.0.0
 VersionInfoCompany=OBS UI Scale community plugin
 VersionInfoDescription=Installer for the OBS UI Scale plugin
 VersionInfoProductName=OBS UI Scale
-VersionInfoProductVersion=0.6.0
+VersionInfoProductVersion=0.7.0
 VersionInfoCopyright=Community plugin; not affiliated with OBS Project
 
 [Files]
