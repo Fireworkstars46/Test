@@ -27,6 +27,7 @@ jobs:
           $native = $native.Replace('0x54533130', '0x54533131')
           $native = $native.Replace('if (requested < 1) requested = 1;`r`n    if (requested > 100) requested = 100;', 'if (requested < 20) requested = 16;`r`n    else if (requested < 29) requested = 24;`r`n    else requested = 32;')
           $native = $native.Replace('RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW', 'RDW_INVALIDATE | RDW_UPDATENOW')
+          $native = $native.Replace('`r`n', [Environment]::NewLine)
           Set-Content TaskbarIconHookV11.build.cpp $native -Encoding utf8
 
           $ui = Get-Content ProgramV10.cs -Raw
@@ -48,6 +49,7 @@ jobs:
           $ui = $ui.Replace('WriteDword(AppKey, "HookEnabledV9", 0);', 'WriteDword(AppKey, "HookEnabledV9", 0);`r`n            WriteDword(AppKey, "HookEnabledV10", 0);')
           $ui = $ui.Replace('Applied immediately. Icon image + taskbar slot + Search refresh sent.', 'Applied. Safe icon image + compact taskbar slot + Search refresh sent.')
           $ui = $ui.Replace('Icon redraw is forced immediately now; you should not need to hover over icons to update them.', 'Safe rendering avoids blank/stretched icons. Taskbar redraw is still forced immediately.')
+          $ui = $ui.Replace('`r`n', [Environment]::NewLine)
           Set-Content ProgramV11.build.cs $ui -Encoding utf8
 
       - name: Build native taskbar hook
