@@ -68,7 +68,12 @@ jobs:
           $src = $src.Replace('TaskbarIconHook-0.6.dll', 'TaskbarIconHook-0.7.dll')
           $src = $src.Replace('V6', 'V7')
           $src = $src.Replace('liveApplyTimer.Interval = 110;', 'liveApplyTimer.Interval = 25;')
-          $src = $src.Replace('WriteDword(AppKey, "HookEnabled", 0);', "WriteDword(AppKey, \"HookEnabled\", 0);`r`n                WriteDword(AppKey, \"HookEnabledV6\", 0);")
+          $old = 'WriteDword(AppKey, "HookEnabled", 0);'
+          $new = @'
+          WriteDword(AppKey, "HookEnabled", 0);
+                          WriteDword(AppKey, "HookEnabledV6", 0);
+          '@
+          $src = $src.Replace($old, $new.Trim())
           $src = $src.Replace('v0.7 uses a smooth TraySettings refresh. It no longer flips Small taskbar buttons\non/off or restarts Explorer for normal size changes.', 'v0.7 keeps the custom taskbar icon size active instead of letting Explorer\nrevert it a moment later. Live changes still avoid restarting Explorer.')
           Set-Content Program.build.cs $src -Encoding utf8
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
