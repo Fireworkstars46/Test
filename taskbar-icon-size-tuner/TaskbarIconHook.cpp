@@ -10,7 +10,7 @@
 #pragma comment(lib, "gdi32.lib")
 
 static const wchar_t* kAppKey = L"Software\\Taskbar Icon Size Tuner";
-static const UINT_PTR kTraySubclassId = 0x54495357; // TISW
+static const UINT_PTR kTraySubclassId = 0x54495358; // TISX
 
 static volatile LONG g_initialized = 0;
 static volatile LONG g_reloadContext = 0;
@@ -19,6 +19,8 @@ static volatile LONG g_metricHits = 0;
 static DWORD g_taskbarThreadId = 0;
 static HWND g_trayWnd = NULL;
 static ULONGLONG g_sizingWindowUntil = 0;
+static DWORD g_lastEffectiveSize = 0;
+static DWORD g_lastMaxFitSize = 0;
 
 typedef int (WINAPI* MulDivFn)(int, int, int);
 typedef int (WINAPI* GetSystemMetricsFn)(int);
@@ -47,17 +49,6 @@ static DWORD ReadDword(const wchar_t* name, DWORD fallback)
     return value;
 }
 
-static DWORD CustomLogicalSize()
-{
-    if (ReadDword(L"HookEnabledV7", 0) == 0)
-        return 0;
-
-    DWORD size = ReadDword(L"HookIconSizeV7", 0);
-    if (size < 1 || size > 100)
-        return 0;
-    return size;
-}
-
 static UINT TaskbarDpi()
 {
     if (g_trayWnd)
@@ -73,6 +64,53 @@ static UINT TaskbarDpi()
     int dpi = GetDeviceCaps(dc, LOGPIXELSX);
     ReleaseDC(NULL, dc);
     return dpi > 0 ? (UINT)dpi : 96;
+}
+
+static DWORD ClampToTaskbar(DWORD requested)
+{
+    if (!g_trayWnd || requested == 0)
+        return requested;
+
+    RECT rc = {};
+    if (!GetWindowRect(g_trayWnd, &rc))
+        return requested;
+
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+    int thickness = width < height ? width : height;
+    if (thickness <= 8)
+        return requested;
+
+    // Leave a little breathing room so oversized icons never extend outside the taskbar.
+    int maxPhysical = thickness - 6;
+    UINT dpi = TaskbarDpi();
+    int maxLogical = ::MulDiv(maxPhysical, 96, (int)(dpi ? dpi : 96));
+    if (maxLogical < 1)
+        maxLogical = 1;
+
+    DWORD effective = requested > (DWORD)maxLogical ? (DWORD)maxLogical : requested;
+    if (effective != g_lastEffectiveSize)
+    {
+        g_lastEffectiveSize = effective;
+        WriteDword(L"DiagEffectiveSizeV8", effective);
+    }
+    if ((DWORD)maxLogical != g_lastMaxFitSize)
+    {
+        g_lastMaxFitSize = (DWORD)maxLogical;
+        WriteDword(L"DiagMaxFitSizeV8", (DWORD)maxLogical);
+    }
+    return effective;
+}
+
+static DWORD CustomLogicalSize()
+{
+    if (ReadDword(L"HookEnabledV8", 0) == 0)
+        return 0;
+
+    DWORD size = ReadDword(L"HookIconSizeV8", 0);
+    if (size < 1 || size > 100)
+        return 0;
+    return ClampToTaskbar(size);
 }
 
 static int ScaleLogicalSize(DWORD logical, UINT dpi)
@@ -100,24 +138,20 @@ static void MarkMulDivHit()
 {
     LONG hits = InterlockedIncrement(&g_mulDivHits);
     if (hits <= 9999)
-        WriteDword(L"DiagMulDivHitsV7", (DWORD)hits);
+        WriteDword(L"DiagMulDivHitsV8", (DWORD)hits);
 }
 
 static void MarkMetricHit()
 {
     LONG hits = InterlockedIncrement(&g_metricHits);
     if (hits <= 9999)
-        WriteDword(L"DiagMetricHitsV7", (DWORD)hits);
+        WriteDword(L"DiagMetricHitsV8", (DWORD)hits);
 }
 
 static int WINAPI MulDivHook(int nNumber, int nNumerator, int nDenominator)
 {
     DWORD custom = CustomLogicalSize();
 
-    // The v0.6 hook only changed these values during the brief TraySettings refresh.
-    // Explorer can perform another icon calculation a moment later and restore the stock size.
-    // Keep this one narrow but persistent: only Explorer's taskbar UI thread, only the
-    // common taskbar icon logical sizes, and only 96-based DPI scaling calls.
     if (custom && OnTaskbarThread() && nDenominator == 96 &&
         (nNumber == 16 || nNumber == 20 || nNumber == 24 || nNumber == 32))
     {
@@ -238,7 +272,7 @@ static LRESULT CALLBACK TraySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     {
         g_sizingWindowUntil = GetTickCount64() + 700;
         InterlockedIncrement(&g_reloadContext);
-        WriteDword(L"DiagSmoothRefreshesV7", ReadDword(L"DiagSmoothRefreshesV7", 0) + 1);
+        WriteDword(L"DiagSmoothRefreshesV8", ReadDword(L"DiagSmoothRefreshesV8", 0) + 1);
         LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
         InterlockedDecrement(&g_reloadContext);
         InvalidateRect(hwnd, NULL, FALSE);
@@ -253,19 +287,21 @@ static void SetupHook()
     if (InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
         return;
 
-    WriteDword(L"DiagInjectedV7", 1);
-    WriteDword(L"DiagTraySubclassV7", 0);
-    WriteDword(L"DiagMulDivPatchedV7", 0);
-    WriteDword(L"DiagMetricsPatchedV7", 0);
-    WriteDword(L"DiagMetricsForDpiPatchedV7", 0);
-    WriteDword(L"DiagMulDivHitsV7", 0);
-    WriteDword(L"DiagMetricHitsV7", 0);
-    WriteDword(L"DiagSmoothRefreshesV7", 0);
+    WriteDword(L"DiagInjectedV8", 1);
+    WriteDword(L"DiagTraySubclassV8", 0);
+    WriteDword(L"DiagMulDivPatchedV8", 0);
+    WriteDword(L"DiagMetricsPatchedV8", 0);
+    WriteDword(L"DiagMetricsForDpiPatchedV8", 0);
+    WriteDword(L"DiagMulDivHitsV8", 0);
+    WriteDword(L"DiagMetricHitsV8", 0);
+    WriteDword(L"DiagSmoothRefreshesV8", 0);
+    WriteDword(L"DiagEffectiveSizeV8", 0);
+    WriteDword(L"DiagMaxFitSizeV8", 0);
 
     g_trayWnd = FindWindowW(L"Shell_TrayWnd", NULL);
     if (!g_trayWnd)
     {
-        WriteDword(L"DiagInjectedV7", 2);
+        WriteDword(L"DiagInjectedV8", 2);
         InterlockedExchange(&g_initialized, 0);
         return;
     }
@@ -273,25 +309,25 @@ static void SetupHook()
     g_taskbarThreadId = GetWindowThreadProcessId(g_trayWnd, NULL);
     if (!g_taskbarThreadId)
     {
-        WriteDword(L"DiagInjectedV7", 3);
+        WriteDword(L"DiagInjectedV8", 3);
         InterlockedExchange(&g_initialized, 0);
         return;
     }
 
-    // Pinned while Explorer is running; setting HookEnabledV7=0 makes it inert immediately.
+    // Pinned while Explorer is running; setting HookEnabledV8=0 makes it inert immediately.
     HMODULE self = NULL;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
                        reinterpret_cast<LPCWSTR>(&SetupHook), &self);
 
     if (SetWindowSubclass(g_trayWnd, TraySubclassProc, kTraySubclassId, 0))
-        WriteDword(L"DiagTraySubclassV7", 1);
+        WriteDword(L"DiagTraySubclassV8", 1);
 
     void* original = NULL;
     int count = PatchMainModuleIAT("MulDiv", reinterpret_cast<void*>(&MulDivHook), &original);
     if (count > 0)
     {
         g_originalMulDiv = reinterpret_cast<MulDivFn>(original);
-        WriteDword(L"DiagMulDivPatchedV7", (DWORD)count);
+        WriteDword(L"DiagMulDivPatchedV8", (DWORD)count);
     }
 
     original = NULL;
@@ -299,7 +335,7 @@ static void SetupHook()
     if (count > 0)
     {
         g_originalGetSystemMetrics = reinterpret_cast<GetSystemMetricsFn>(original);
-        WriteDword(L"DiagMetricsPatchedV7", (DWORD)count);
+        WriteDword(L"DiagMetricsPatchedV8", (DWORD)count);
     }
 
     original = NULL;
@@ -307,7 +343,7 @@ static void SetupHook()
     if (count > 0)
     {
         g_originalGetSystemMetricsForDpi = reinterpret_cast<GetSystemMetricsForDpiFn>(original);
-        WriteDword(L"DiagMetricsForDpiPatchedV7", (DWORD)count);
+        WriteDword(L"DiagMetricsForDpiPatchedV8", (DWORD)count);
     }
 }
 
