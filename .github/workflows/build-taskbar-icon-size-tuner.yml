@@ -23,7 +23,7 @@ jobs:
           if not exist bin mkdir bin
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSINSTALL=%%i
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
-          cl /nologo /LD /O2 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 TaskbarIconHook.cpp /link /OUT:bin\TaskbarIconHook-0.6.dll user32.lib advapi32.lib comctl32.lib gdi32.lib
+          cl /nologo /LD /O2 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 TaskbarIconHook.cpp /link /OUT:bin\TaskbarIconHook-0.7.dll user32.lib advapi32.lib comctl32.lib gdi32.lib
 
       - name: Generate app icon
         shell: pwsh
@@ -63,9 +63,17 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $src = Get-Content Program.cs -Raw
+          $src = $src.Replace('v0.6', 'v0.7')
+          $src = $src.Replace('TaskbarIconHook-0.6.dll', 'TaskbarIconHook-0.7.dll')
+          $src = $src.Replace('V6', 'V7')
+          $src = $src.Replace('liveApplyTimer.Interval = 110;', 'liveApplyTimer.Interval = 25;')
+          $src = $src.Replace('WriteDword(AppKey, "HookEnabled", 0);', "WriteDword(AppKey, \"HookEnabled\", 0);`r`n                WriteDword(AppKey, \"HookEnabledV6\", 0);")
+          $src = $src.Replace('v0.7 uses a smooth TraySettings refresh. It no longer flips Small taskbar buttons\non/off or restarts Explorer for normal size changes.', 'v0.7 keeps the custom taskbar icon size active instead of letting Explorer\nrevert it a moment later. Live changes still avoid restarting Explorer.')
+          Set-Content Program.build.cs $src -Encoding utf8
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (-not (Test-Path $csc)) { throw "C# compiler not found at $csc" }
-          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:AppIcon.ico /out:bin\TaskbarIconSizeTuner.exe /resource:bin\TaskbarIconHook-0.6.dll,TaskbarIconHook.dll /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll Program.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:AppIcon.ico /out:bin\TaskbarIconSizeTuner.exe /resource:bin\TaskbarIconHook-0.7.dll,TaskbarIconHook.dll /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll Program.build.cs
           if ($LASTEXITCODE -ne 0) { throw "C# compilation failed." }
 
       - name: Locate or install Inno Setup
@@ -87,7 +95,7 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.6.0.exe" -Force
+          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.7.0.exe" -Force
           Get-ChildItem dist\*.exe | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
@@ -96,10 +104,10 @@ jobs:
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: Taskbar-Icon-Size-Tuner-Windows-x64-v0.6
+          name: Taskbar-Icon-Size-Tuner-Windows-x64-v0.7
           path: |
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.6.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.6.0.exe.sha256
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.6.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.6.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.7.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.7.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.7.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.7.0.exe.sha256
           if-no-files-found: error
