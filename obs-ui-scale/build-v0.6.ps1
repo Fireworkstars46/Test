@@ -16,6 +16,7 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 }
 
 Replace-Required 'static constexpr const char *PLUGIN_VERSION = "0.5.0";' 'static constexpr const char *PLUGIN_VERSION = "0.6.0";' 'plugin version'
+Replace-Required '#include <QFont>' "#include <QFont>`n#include <QFontMetrics>" 'QFontMetrics include'
 
 # Replace the fixed tiny-mode minima with minima derived from the scaled font.
 Replace-Required @'
