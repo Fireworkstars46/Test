@@ -12,10 +12,10 @@
 #include <QFont>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLayout>
 #include <QMainWindow>
-#include <QPointer>
 #include <QProxyStyle>
 #include <QPushButton>
 #include <QSettings>
@@ -34,11 +34,13 @@ OBS_DECLARE_MODULE()
 OBS_MODULE_AUTHOR("OBS UI Scale community plugin")
 
 static constexpr const char *PLUGIN_NAME = "OBS UI Scale";
-static constexpr const char *PLUGIN_VERSION = "0.1.0";
+static constexpr const char *PLUGIN_VERSION = "0.2.0";
+static constexpr int MIN_PERCENT = 1;
+static constexpr int MAX_PERCENT = 1000;
 
 const char *obs_module_description(void)
 {
-    return "Scales the OBS Studio Qt interface without changing Windows display scaling or requiring a special launcher.";
+    return "Scales the OBS Studio Qt interface from 1% to 1000% without changing Windows display scaling or requiring a special launcher.";
 }
 
 class ScaledProxyStyle final : public QProxyStyle {
@@ -69,8 +71,6 @@ public:
         return qMax(1, qRound(static_cast<double>(value) * factor_));
     }
 
-    double factor() const { return factor_; }
-
 private:
     double factor_ = 1.0;
 };
@@ -94,18 +94,27 @@ public:
         }
 
         percent_ = settings_ ? settings_->value(QStringLiteral("ui/percent"), 198).toInt() : 198;
-        percent_ = qBound(100, percent_, 250);
+        percent_ = qBound(MIN_PERCENT, percent_, MAX_PERCENT);
         autoApply_ = settings_ ? settings_->value(QStringLiteral("ui/autoApply"), true).toBool() : true;
 
         toolsAction_ = static_cast<QAction *>(obs_frontend_add_tools_menu_qaction("OBS UI Scale..."));
         if (toolsAction_)
             QObject::connect(toolsAction_, &QAction::triggered, this, [this]() { ShowDialog(); });
 
+        auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+        if (mainWindow) {
+            resetAction_ = new QAction(QStringLiteral("Reset OBS UI Scale to 100%"), mainWindow);
+            resetAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+0")));
+            resetAction_->setShortcutContext(Qt::ApplicationShortcut);
+            mainWindow->addAction(resetAction_);
+            QObject::connect(resetAction_, &QAction::triggered, this, [this]() {
+                SaveSettings(100, autoApply_);
+                Restore100();
+            });
+        }
+
         obs_frontend_add_event_callback(&ObsUiScaleController::FrontendEvent, this);
 
-        // Apply once as soon as the plugin loads, then again after OBS announces that
-        // the frontend is finished. This lets the user open OBS normally while still
-        // making the saved scale take effect automatically.
         if (autoApply_) {
             QTimer::singleShot(0, this, [this]() { ApplyScale(percent_); });
             QTimer::singleShot(500, this, [this]() { ApplyScale(percent_); });
@@ -150,7 +159,7 @@ private:
         const double factor = static_cast<double>(percent) / 100.0;
 
         if (font.pointSizeF() > 0.0)
-            font.setPointSizeF(font.pointSizeF() * factor);
+            font.setPointSizeF(qMax(0.1, font.pointSizeF() * factor));
         else if (font.pixelSize() > 0)
             font.setPixelSize(qMax(1, qRound(static_cast<double>(font.pixelSize()) * factor)));
 
@@ -174,12 +183,11 @@ private:
 
     void ApplyScale(int requestedPercent)
     {
-        const int percent = qBound(100, requestedPercent, 250);
+        const int percent = qBound(MIN_PERCENT, requestedPercent, MAX_PERCENT);
         const double factor = static_cast<double>(percent) / 100.0;
 
         if (percent == 100) {
             Restore100();
-            currentPercent_ = 100;
             return;
         }
 
@@ -211,7 +219,7 @@ private:
 
     void SaveSettings(int percent, bool autoApply)
     {
-        percent_ = qBound(100, percent, 250);
+        percent_ = qBound(MIN_PERCENT, percent, MAX_PERCENT);
         autoApply_ = autoApply;
         if (settings_) {
             settings_->setValue(QStringLiteral("ui/percent"), percent_);
@@ -241,23 +249,34 @@ private:
         auto *row = new QHBoxLayout();
         auto *label = new QLabel(QStringLiteral("Scale:"), group);
         auto *spin = new QSpinBox(group);
-        spin->setRange(100, 250);
+        spin->setRange(MIN_PERCENT, MAX_PERCENT);
         spin->setSingleStep(1);
         spin->setSuffix(QStringLiteral("%"));
         spin->setValue(percent_);
-        spin->setToolTip(QStringLiteral("198% is the starting value chosen for this setup."));
+        spin->setToolTip(QStringLiteral("Custom range: 1% to 1000%, adjustable one percent at a time."));
         row->addWidget(label);
         row->addWidget(spin);
         row->addStretch(1);
         groupLayout->addLayout(row);
+
+        auto *presetRow = new QHBoxLayout();
+        const int presets[] = {50, 100, 150, 198, 200, 250};
+        for (int value : presets) {
+            auto *button = new QPushButton(QStringLiteral("%1%").arg(value), group);
+            QObject::connect(button, &QPushButton::clicked, &dialog, [spin, value]() { spin->setValue(value); });
+            presetRow->addWidget(button);
+        }
+        presetRow->addStretch(1);
+        groupLayout->addLayout(presetRow);
 
         auto *autoApply = new QCheckBox(QStringLiteral("Apply this scale automatically whenever OBS starts"), group);
         autoApply->setChecked(autoApply_);
         groupLayout->addWidget(autoApply);
 
         auto *note = new QLabel(
-            QStringLiteral("This is a Qt UI-style scale, so it changes OBS menus, docks, controls, text, spacing, and icons. "
-                           "It does not change your canvas/output resolution. Some browser or third-party dock content may keep its own scale."),
+            QStringLiteral("Range is 1% to 1000%. Very low or very high values can make OBS hard to use. "
+                           "Emergency reset: press Ctrl+Alt+0 at any time to restore and save 100%. "
+                           "This changes the OBS Qt interface only, not your canvas/output resolution."),
             group);
         note->setWordWrap(true);
         groupLayout->addWidget(note);
@@ -287,12 +306,12 @@ private:
         });
 
         QObject::connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
-
         dialog.exec();
     }
 
     std::unique_ptr<QSettings> settings_;
     QAction *toolsAction_ = nullptr;
+    QAction *resetAction_ = nullptr;
     QFont originalFont_;
     QString styleKey_;
     int percent_ = 198;
