@@ -26,6 +26,15 @@ jobs:
         working-directory: obs-ui-scale
         run: |
           Copy-Item "src/plugin-main.cpp" "_obs_template/src/plugin-main.cpp" -Force
+
+          # QApplication::styleSheet/setStyleSheet are instance methods in Qt 6.
+          # Keep the source easy to read while making the CI build use qApp correctly.
+          $pluginPath = "_obs_template/src/plugin-main.cpp"
+          $plugin = Get-Content $pluginPath -Raw
+          $plugin = $plugin.Replace('QApplication::styleSheet()', 'qApp->styleSheet()')
+          $plugin = $plugin.Replace('QApplication::setStyleSheet(', 'qApp->setStyleSheet(')
+          Set-Content $pluginPath $plugin -Encoding utf8
+
           $cmakePath = "_obs_template/CMakeLists.txt"
           $cmake = Get-Content $cmakePath -Raw
           $cmake = $cmake.Replace("src/plugin-main.c", "src/plugin-main.cpp")
