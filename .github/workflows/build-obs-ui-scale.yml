@@ -41,7 +41,7 @@ jobs:
           $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
           $buildspec.name = "obs-ui-scale"
           $buildspec.displayName = "OBS UI Scale"
-          $buildspec.version = "0.1.0"
+          $buildspec.version = "0.2.0"
           $buildspec.author = "OBS UI Scale community plugin"
           $buildspec.website = "https://obsproject.com/"
           $buildspec.email = "noreply@example.invalid"
@@ -84,15 +84,15 @@ jobs:
         shell: pwsh
         working-directory: obs-ui-scale
         run: |
-          $file = Get-Item "dist\OBS-UI-Scale-Setup-0.1.0.exe"
+          $file = Get-Item "dist\OBS-UI-Scale-Setup-0.2.0.exe"
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: OBS-UI-Scale-Setup-Windows-x64
+          name: OBS-UI-Scale-Setup-Windows-x64-v0.2
           path: |
-            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.1.0.exe
-            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.1.0.exe.sha256
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.2.0.exe
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.2.0.exe.sha256
           if-no-files-found: error
