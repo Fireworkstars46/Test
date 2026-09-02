@@ -24,12 +24,16 @@ namespace TaskbarIconSizeTuner
         private const string WindowMetricsKey = @"Control Panel\Desktop\WindowMetrics";
         private const string ExplorerAdvancedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
         private const string SevenTtKey = @"Software\7 Taskbar Tweaker\OptionsEx";
-        private const string BackupKey = @"Software\Taskbar Icon Size Tuner";
+        private const string AppKey = @"Software\Taskbar Icon Size Tuner";
 
         private readonly NumericUpDown sizeBox = new NumericUpDown();
         private readonly CheckBox smallTaskbarCheck = new CheckBox();
         private readonly CheckBox sevenTtLargeCheck = new CheckBox();
+        private readonly CheckBox closeToTrayCheck = new CheckBox();
         private readonly Label statusLabel = new Label();
+        private readonly NotifyIcon trayIcon = new NotifyIcon();
+        private bool exitRequested;
+        private bool trayTipShown;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam,
@@ -41,12 +45,12 @@ namespace TaskbarIconSizeTuner
 
         public MainForm()
         {
-            Text = "Taskbar Icon Size Tuner";
+            Text = "Taskbar Icon Size Tuner v0.2";
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = true;
-            ClientSize = new Size(470, 330);
+            ClientSize = new Size(490, 385);
             Font = new Font("Segoe UI", 9F);
 
             var title = new Label
@@ -61,7 +65,7 @@ namespace TaskbarIconSizeTuner
             var info = new Label
             {
                 Text = "Experimental, no injection: changes the Windows shell small-icon metric.\n" +
-                       "This can affect small Explorer icons too. Try 18-24 for an in-between size.",
+                       "Range is 1-100 px. Extreme values may be ignored or look broken.",
                 AutoSize = true,
                 Location = new Point(20, 52)
             };
@@ -75,8 +79,8 @@ namespace TaskbarIconSizeTuner
             };
             Controls.Add(sizeLabel);
 
-            sizeBox.Minimum = 12;
-            sizeBox.Maximum = 48;
+            sizeBox.Minimum = 1;
+            sizeBox.Maximum = 100;
             sizeBox.Value = 20;
             sizeBox.Width = 72;
             sizeBox.Location = new Point(180, 101);
@@ -95,12 +99,19 @@ namespace TaskbarIconSizeTuner
             sevenTtLargeCheck.Location = new Point(20, 170);
             Controls.Add(sevenTtLargeCheck);
 
+            closeToTrayCheck.Text = "Minimize / close to tray (settings stay saved)";
+            closeToTrayCheck.AutoSize = true;
+            closeToTrayCheck.Location = new Point(20, 198);
+            closeToTrayCheck.Checked = true;
+            closeToTrayCheck.CheckedChanged += (s, e) => SaveAppPreferences();
+            Controls.Add(closeToTrayCheck);
+
             var apply = new Button
             {
                 Text = "Apply + Restart Explorer",
                 Width = 185,
                 Height = 34,
-                Location = new Point(20, 210)
+                Location = new Point(20, 238)
             };
             apply.Click += (s, e) => ApplySettings(true);
             Controls.Add(apply);
@@ -110,7 +121,7 @@ namespace TaskbarIconSizeTuner
                 Text = "Apply Only",
                 Width = 105,
                 Height = 34,
-                Location = new Point(215, 210)
+                Location = new Point(215, 238)
             };
             applyOnly.Click += (s, e) => ApplySettings(false);
             Controls.Add(applyOnly);
@@ -118,20 +129,120 @@ namespace TaskbarIconSizeTuner
             var restore = new Button
             {
                 Text = "Restore Original",
-                Width = 120,
+                Width = 130,
                 Height = 34,
-                Location = new Point(330, 210)
+                Location = new Point(330, 238)
             };
             restore.Click += (s, e) => RestoreOriginal();
             Controls.Add(restore);
 
             statusLabel.AutoSize = false;
-            statusLabel.Size = new Size(430, 58);
-            statusLabel.Location = new Point(20, 260);
-            statusLabel.Text = "Ready.";
+            statusLabel.Size = new Size(450, 75);
+            statusLabel.Location = new Point(20, 292);
+            statusLabel.Text = "Ready. Applied settings remain active even if this app is fully exited.";
             Controls.Add(statusLabel);
 
+            SetupTrayIcon();
             LoadCurrent();
+            LoadAppPreferences();
+
+            Resize += OnResizeToTray;
+            FormClosing += OnFormClosing;
+        }
+
+        private void SetupTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            var showItem = new ToolStripMenuItem("Show");
+            showItem.Click += (s, e) => ShowFromTray();
+            var exitItem = new ToolStripMenuItem("Exit (keep settings)");
+            exitItem.Click += (s, e) => ExitApplication();
+            menu.Items.Add(showItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(exitItem);
+
+            trayIcon.Text = "Taskbar Icon Size Tuner";
+            trayIcon.Icon = SystemIcons.Application;
+            trayIcon.ContextMenuStrip = menu;
+            trayIcon.Visible = true;
+            trayIcon.DoubleClick += (s, e) => ShowFromTray();
+        }
+
+        private void OnResizeToTray(object sender, EventArgs e)
+        {
+            if (WindowState == FormWindowState.Minimized && closeToTrayCheck.Checked)
+                HideToTray();
+        }
+
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (!exitRequested && e.CloseReason == CloseReason.UserClosing && closeToTrayCheck.Checked)
+            {
+                e.Cancel = true;
+                HideToTray();
+            }
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+            ShowInTaskbar = false;
+            if (!trayTipShown)
+            {
+                trayIcon.BalloonTipTitle = "Taskbar Icon Size Tuner";
+                trayIcon.BalloonTipText = "Still running in the tray. Your applied icon setting is saved either way.";
+                trayIcon.ShowBalloonTip(2500);
+                trayTipShown = true;
+            }
+        }
+
+        private void ShowFromTray()
+        {
+            ShowInTaskbar = true;
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        private void ExitApplication()
+        {
+            exitRequested = true;
+            trayIcon.Visible = false;
+            Close();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                trayIcon.Dispose();
+            base.Dispose(disposing);
+        }
+
+        private void LoadAppPreferences()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(AppKey))
+                {
+                    if (key != null)
+                    {
+                        object close = key.GetValue("CloseToTray");
+                        if (close != null)
+                            closeToTrayCheck.Checked = Convert.ToInt32(close) != 0;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void SaveAppPreferences()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.CreateSubKey(AppKey))
+                    key.SetValue("CloseToTray", closeToTrayCheck.Checked ? 1 : 0, RegistryValueKind.DWord);
+            }
+            catch { }
         }
 
         private void LoadCurrent()
@@ -142,7 +253,7 @@ namespace TaskbarIconSizeTuner
                 {
                     object v = key == null ? null : key.GetValue("Shell Small Icon Size");
                     int n;
-                    if (v != null && int.TryParse(v.ToString(), out n) && n >= 12 && n <= 48)
+                    if (v != null && int.TryParse(v.ToString(), out n) && n >= 1 && n <= 100)
                         sizeBox.Value = n;
                 }
 
@@ -166,7 +277,7 @@ namespace TaskbarIconSizeTuner
 
         private void BackupOnce()
         {
-            using (var backup = Registry.CurrentUser.CreateSubKey(BackupKey))
+            using (var backup = Registry.CurrentUser.CreateSubKey(AppKey))
             {
                 if (Convert.ToInt32(backup.GetValue("BackupMade", 0)) == 1)
                     return;
@@ -211,9 +322,11 @@ namespace TaskbarIconSizeTuner
                 using (var key = Registry.CurrentUser.CreateSubKey(SevenTtKey))
                     key.SetValue("w10_large_icons", sevenTtLargeCheck.Checked ? 1 : 0, RegistryValueKind.DWord);
 
-                BroadcastSettings();
+                using (var key = Registry.CurrentUser.CreateSubKey(AppKey))
+                    key.SetValue("LastAppliedSize", (int)sizeBox.Value, RegistryValueKind.DWord);
 
-                statusLabel.Text = "Applied " + sizeBox.Value + " px. " +
+                BroadcastSettings();
+                statusLabel.Text = "Applied " + sizeBox.Value + " px. The setting is saved and stays active after closing the app. " +
                                    (restartExplorer ? "Restarting Explorer..." : "Restart Explorer or sign out to fully apply.");
 
                 if (restartExplorer)
@@ -229,7 +342,7 @@ namespace TaskbarIconSizeTuner
         {
             try
             {
-                using (var backup = Registry.CurrentUser.OpenSubKey(BackupKey))
+                using (var backup = Registry.CurrentUser.OpenSubKey(AppKey))
                 {
                     if (backup == null || Convert.ToInt32(backup.GetValue("BackupMade", 0)) != 1)
                     {
