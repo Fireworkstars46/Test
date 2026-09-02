@@ -7,22 +7,18 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
 
 static const wchar_t* kAppKey = L"Software\\Taskbar Icon Size Tuner";
-static const wchar_t* kExplorerAdvancedKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced";
-static const UINT kRefreshMessage = WM_APP + 0x4D1;
-static const UINT_PTR kSubclassId = 0x54495354;
-static const UINT_PTR kRestoreSmallButtonsTimer = 0x54495355;
+static const UINT_PTR kTraySubclassId = 0x54495356; // TISV
 
 static volatile LONG g_initialized = 0;
-static volatile LONG g_iconReloadContext = 0;
+static volatile LONG g_reloadContext = 0;
 static volatile LONG g_mulDivHits = 0;
 static volatile LONG g_metricHits = 0;
 static DWORD g_taskbarThreadId = 0;
-static HWND g_taskSwWnd = NULL;
 static HWND g_trayWnd = NULL;
-static ULONGLONG g_forceSizingUntil = 0;
-static DWORD g_restoreSmallButtons = 0;
+static ULONGLONG g_sizingWindowUntil = 0;
 
 typedef int (WINAPI* MulDivFn)(int, int, int);
 typedef int (WINAPI* GetSystemMetricsFn)(int);
@@ -51,30 +47,13 @@ static DWORD ReadDword(const wchar_t* name, DWORD fallback)
     return value;
 }
 
-static DWORD ReadExplorerDword(const wchar_t* name, DWORD fallback)
-{
-    DWORD value = fallback;
-    DWORD size = sizeof(value);
-    if (RegGetValueW(HKEY_CURRENT_USER, kExplorerAdvancedKey, name, RRF_RT_REG_DWORD, NULL, &value, &size) != ERROR_SUCCESS)
-        return fallback;
-    return value;
-}
-
-static void WriteExplorerDword(const wchar_t* name, DWORD value)
-{
-    HKEY key = NULL;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, kExplorerAdvancedKey, 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL) == ERROR_SUCCESS)
-    {
-        RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-        RegCloseKey(key);
-    }
-}
-
 static DWORD CustomLogicalSize()
 {
-    DWORD enabled = ReadDword(L"HookEnabled", 0);
-    DWORD size = ReadDword(L"HookIconSize", 0);
-    if (!enabled || size < 1 || size > 100)
+    if (ReadDword(L"HookEnabledV6", 0) == 0)
+        return 0;
+
+    DWORD size = ReadDword(L"HookIconSizeV6", 0);
+    if (size < 1 || size > 100)
         return 0;
     return size;
 }
@@ -98,15 +77,7 @@ static UINT TaskbarDpi()
 
 static int ScaleLogicalSize(DWORD logical, UINT dpi)
 {
-    if (!logical)
-        return 0;
     return ::MulDiv((int)logical, (int)(dpi ? dpi : 96), 96);
-}
-
-static bool InStrictTaskbarIconReload()
-{
-    return GetCurrentThreadId() == g_taskbarThreadId &&
-           InterlockedCompareExchange(&g_iconReloadContext, 0, 0) > 0;
 }
 
 static bool InTaskbarSizingWindow()
@@ -114,24 +85,24 @@ static bool InTaskbarSizingWindow()
     if (GetCurrentThreadId() != g_taskbarThreadId)
         return false;
 
-    if (InterlockedCompareExchange(&g_iconReloadContext, 0, 0) > 0)
+    if (InterlockedCompareExchange(&g_reloadContext, 0, 0) > 0)
         return true;
 
-    return GetTickCount64() <= g_forceSizingUntil;
+    return GetTickCount64() <= g_sizingWindowUntil;
 }
 
 static void MarkMulDivHit()
 {
     LONG hits = InterlockedIncrement(&g_mulDivHits);
-    if (hits <= 32)
-        WriteDword(L"DiagMulDivHits", (DWORD)hits);
+    if (hits <= 9999)
+        WriteDword(L"DiagMulDivHitsV6", (DWORD)hits);
 }
 
 static void MarkMetricHit()
 {
     LONG hits = InterlockedIncrement(&g_metricHits);
-    if (hits <= 32)
-        WriteDword(L"DiagMetricHits", (DWORD)hits);
+    if (hits <= 9999)
+        WriteDword(L"DiagMetricHitsV6", (DWORD)hits);
 }
 
 static int WINAPI MulDivHook(int nNumber, int nNumerator, int nDenominator)
@@ -157,7 +128,7 @@ static bool IsIconMetric(int index)
 static int WINAPI GetSystemMetricsHook(int index)
 {
     DWORD custom = CustomLogicalSize();
-    if (custom && InStrictTaskbarIconReload() && IsIconMetric(index))
+    if (custom && InTaskbarSizingWindow() && IsIconMetric(index))
     {
         MarkMetricHit();
         return ScaleLogicalSize(custom, TaskbarDpi());
@@ -170,7 +141,7 @@ static int WINAPI GetSystemMetricsHook(int index)
 static int WINAPI GetSystemMetricsForDpiHook(int index, UINT dpi)
 {
     DWORD custom = CustomLogicalSize();
-    if (custom && InStrictTaskbarIconReload() && IsIconMetric(index))
+    if (custom && InTaskbarSizingWindow() && IsIconMetric(index))
     {
         MarkMetricHit();
         return ScaleLogicalSize(custom, dpi);
@@ -241,91 +212,28 @@ static int PatchMainModuleIAT(const char* importName, void* replacement, void** 
     return patched;
 }
 
-static BOOL CALLBACK FindTaskSwProc(HWND hwnd, LPARAM lParam)
+static bool IsTraySettingsMessage(UINT msg, LPARAM lParam)
 {
-    wchar_t className[96] = {};
-    if (GetClassNameW(hwnd, className, ARRAYSIZE(className)) && lstrcmpW(className, L"MSTaskSwWClass") == 0)
+    if (msg != WM_SETTINGCHANGE || !lParam)
+        return false;
+
+    const wchar_t* text = reinterpret_cast<const wchar_t*>(lParam);
+    return lstrcmpW(text, L"TraySettings") == 0;
+}
+
+static LRESULT CALLBACK TraySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                                         UINT_PTR, DWORD_PTR)
+{
+    if (IsTraySettingsMessage(msg, lParam))
     {
-        *reinterpret_cast<HWND*>(lParam) = hwnd;
-        return FALSE;
-    }
-    return TRUE;
-}
-
-static HWND FindTaskSwWindow()
-{
-    HWND tray = FindWindowW(L"Shell_TrayWnd", NULL);
-    if (!tray)
-        return NULL;
-
-    HWND found = NULL;
-    EnumChildWindows(tray, FindTaskSwProc, reinterpret_cast<LPARAM>(&found));
-    return found;
-}
-
-static bool IsIconReloadMessage(UINT msg)
-{
-    return msg == 0x043A || msg == 0x0446 || msg == 0x0452 || msg == 0x0467;
-}
-
-static void BroadcastTraySettings()
-{
-    SendNotifyMessageW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, reinterpret_cast<LPARAM>(L"TraySettings"));
-}
-
-static void BeginForcedTaskbarReload(HWND hwnd)
-{
-    g_restoreSmallButtons = ReadExplorerDword(L"TaskbarSmallIcons", 0) ? 1 : 0;
-    DWORD temporary = g_restoreSmallButtons ? 0 : 1;
-
-    g_forceSizingUntil = GetTickCount64() + 7000;
-    WriteDword(L"DiagToggleRefreshes", ReadDword(L"DiagToggleRefreshes", 0) + 1);
-
-    WriteExplorerDword(L"TaskbarSmallIcons", temporary);
-    BroadcastTraySettings();
-    SetTimer(hwnd, kRestoreSmallButtonsTimer, 450, NULL);
-}
-
-static LRESULT CALLBACK TaskSwSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-                                           UINT_PTR, DWORD_PTR)
-{
-    if (msg == kRefreshMessage)
-    {
-        WriteDword(L"DiagRefreshMessages", ReadDword(L"DiagRefreshMessages", 0) + 1);
-        BeginForcedTaskbarReload(hwnd);
-
-        InterlockedIncrement(&g_iconReloadContext);
-        LRESULT result = DefSubclassProc(hwnd, 0x0452, 0, 0);
-        DefSubclassProc(hwnd, 0x043A, 0, 0);
-        InterlockedDecrement(&g_iconReloadContext);
-
-        InvalidateRect(hwnd, NULL, TRUE);
-        UpdateWindow(hwnd);
-        return result;
-    }
-
-    if (msg == WM_TIMER && wParam == kRestoreSmallButtonsTimer)
-    {
-        KillTimer(hwnd, kRestoreSmallButtonsTimer);
-        g_forceSizingUntil = GetTickCount64() + 7000;
-        WriteExplorerDword(L"TaskbarSmallIcons", g_restoreSmallButtons);
-        BroadcastTraySettings();
-
-        InterlockedIncrement(&g_iconReloadContext);
-        LRESULT result = DefSubclassProc(hwnd, 0x0452, 0, 0);
-        DefSubclassProc(hwnd, 0x043A, 0, 0);
-        InterlockedDecrement(&g_iconReloadContext);
-
-        InvalidateRect(hwnd, NULL, TRUE);
-        UpdateWindow(hwnd);
-        return result;
-    }
-
-    if (IsIconReloadMessage(msg))
-    {
-        InterlockedIncrement(&g_iconReloadContext);
+        // Windows 10 reloads the taskbar icons synchronously from this message.
+        // Keep the custom sizing hook active only for that short reload window.
+        g_sizingWindowUntil = GetTickCount64() + 700;
+        InterlockedIncrement(&g_reloadContext);
+        WriteDword(L"DiagSmoothRefreshesV6", ReadDword(L"DiagSmoothRefreshesV6", 0) + 1);
         LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
-        InterlockedDecrement(&g_iconReloadContext);
+        InterlockedDecrement(&g_reloadContext);
+        InvalidateRect(hwnd, NULL, FALSE);
         return result;
     }
 
@@ -337,19 +245,19 @@ static void SetupHook()
     if (InterlockedCompareExchange(&g_initialized, 1, 0) != 0)
         return;
 
-    WriteDword(L"DiagInjected", 1);
-    WriteDword(L"DiagTaskSwFound", 0);
-    WriteDword(L"DiagMulDivPatched", 0);
-    WriteDword(L"DiagMetricsPatched", 0);
-    WriteDword(L"DiagMetricsForDpiPatched", 0);
-    WriteDword(L"DiagMulDivHits", 0);
-    WriteDword(L"DiagMetricHits", 0);
-    WriteDword(L"DiagToggleRefreshes", 0);
+    WriteDword(L"DiagInjectedV6", 1);
+    WriteDword(L"DiagTraySubclassV6", 0);
+    WriteDword(L"DiagMulDivPatchedV6", 0);
+    WriteDword(L"DiagMetricsPatchedV6", 0);
+    WriteDword(L"DiagMetricsForDpiPatchedV6", 0);
+    WriteDword(L"DiagMulDivHitsV6", 0);
+    WriteDword(L"DiagMetricHitsV6", 0);
+    WriteDword(L"DiagSmoothRefreshesV6", 0);
 
     g_trayWnd = FindWindowW(L"Shell_TrayWnd", NULL);
     if (!g_trayWnd)
     {
-        WriteDword(L"DiagInjected", 2);
+        WriteDword(L"DiagInjectedV6", 2);
         InterlockedExchange(&g_initialized, 0);
         return;
     }
@@ -357,28 +265,25 @@ static void SetupHook()
     g_taskbarThreadId = GetWindowThreadProcessId(g_trayWnd, NULL);
     if (!g_taskbarThreadId)
     {
-        WriteDword(L"DiagInjected", 3);
+        WriteDword(L"DiagInjectedV6", 3);
         InterlockedExchange(&g_initialized, 0);
         return;
     }
 
+    // Keep the hook alive while Explorer is running. It becomes inert when HookEnabledV6=0.
     HMODULE self = NULL;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
                        reinterpret_cast<LPCWSTR>(&SetupHook), &self);
 
-    g_taskSwWnd = FindTaskSwWindow();
-    if (g_taskSwWnd)
-    {
-        WriteDword(L"DiagTaskSwFound", 1);
-        SetWindowSubclass(g_taskSwWnd, TaskSwSubclassProc, kSubclassId, 0);
-    }
+    if (SetWindowSubclass(g_trayWnd, TraySubclassProc, kTraySubclassId, 0))
+        WriteDword(L"DiagTraySubclassV6", 1);
 
     void* original = NULL;
     int count = PatchMainModuleIAT("MulDiv", reinterpret_cast<void*>(&MulDivHook), &original);
     if (count > 0)
     {
         g_originalMulDiv = reinterpret_cast<MulDivFn>(original);
-        WriteDword(L"DiagMulDivPatched", (DWORD)count);
+        WriteDword(L"DiagMulDivPatchedV6", (DWORD)count);
     }
 
     original = NULL;
@@ -386,7 +291,7 @@ static void SetupHook()
     if (count > 0)
     {
         g_originalGetSystemMetrics = reinterpret_cast<GetSystemMetricsFn>(original);
-        WriteDword(L"DiagMetricsPatched", (DWORD)count);
+        WriteDword(L"DiagMetricsPatchedV6", (DWORD)count);
     }
 
     original = NULL;
@@ -394,11 +299,8 @@ static void SetupHook()
     if (count > 0)
     {
         g_originalGetSystemMetricsForDpi = reinterpret_cast<GetSystemMetricsForDpiFn>(original);
-        WriteDword(L"DiagMetricsForDpiPatched", (DWORD)count);
+        WriteDword(L"DiagMetricsForDpiPatchedV6", (DWORD)count);
     }
-
-    if (g_taskSwWnd)
-        PostMessageW(g_taskSwWnd, kRefreshMessage, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LRESULT CALLBACK TunerHookProc(int code, WPARAM wParam, LPARAM lParam)
