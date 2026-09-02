@@ -93,9 +93,9 @@ Replace-Required @'
 Replace-Required @'
     QFont ScaledFont(int textPercent) const
 '@ @'
-    void ApplyProportionalDockGeometry(int uiPercent)
+    void ApplyProportionalDockGeometry(int uiPercent, bool force = false)
     {
-        if (!proportionalMode_)
+        if (!proportionalMode_ && !force)
             return;
 
         auto *mainWindow = static_cast<QMainWindow *>(obs_frontend_get_main_window());
@@ -207,7 +207,7 @@ Replace-Required @'
 '@ @'
         QApplication::setFont(originalFont_);
         ApplyCapturedWidgetMetrics(100);
-        ApplyProportionalDockGeometry(100);
+        ApplyProportionalDockGeometry(100, true);
         currentUiPercent_ = 100;
 '@ 'restore dock geometry'
 
@@ -264,6 +264,8 @@ Replace-Required @'
                            "With safe tiny mode on, proportional values 1-49% render at a stable 50% while keeping the requested value saved. "
 '@ 'proportional note'
 
+# This substring occurs in both Apply and Restore handlers, so one Replace()
+# intentionally updates both handlers at once.
 Replace-Required @'
                          [this, uiSpin, textSpin, safeTiny, autoApply, status]() {
                              safeTinyMode_ = safeTiny->isChecked();
@@ -273,18 +275,7 @@ Replace-Required @'
                              if (settings_)
                                  settings_->setValue(QStringLiteral("ui/proportionalMode"), proportionalMode_);
                              safeTinyMode_ = safeTiny->isChecked();
-'@ 'save proportional on apply'
-
-Replace-Required @'
-                         [this, uiSpin, textSpin, safeTiny, autoApply, status]() {
-                             safeTinyMode_ = safeTiny->isChecked();
-'@ @'
-                         [this, uiSpin, textSpin, proportional, safeTiny, autoApply, status]() {
-                             proportionalMode_ = proportional->isChecked();
-                             if (settings_)
-                                 settings_->setValue(QStringLiteral("ui/proportionalMode"), proportionalMode_);
-                             safeTinyMode_ = safeTiny->isChecked();
-'@ 'save proportional on restore'
+'@ 'save proportional mode in handlers'
 
 Replace-Required @'
     bool autoApply_ = true;
