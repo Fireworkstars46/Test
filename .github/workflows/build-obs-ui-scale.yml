@@ -1,0 +1,98 @@
+name: Build OBS UI Scale Windows plugin + installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [obs-ui-scale-temp-build]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout OBS UI Scale
+        uses: actions/checkout@v4
+
+      - name: Clone official OBS plugin template
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: git clone --depth 1 https://github.com/obsproject/obs-plugintemplate.git _obs_template
+
+      - name: Configure plugin template
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: |
+          Copy-Item "src/plugin-main.cpp" "_obs_template/src/plugin-main.cpp" -Force
+          $cmakePath = "_obs_template/CMakeLists.txt"
+          $cmake = Get-Content $cmakePath -Raw
+          $cmake = $cmake.Replace("src/plugin-main.c", "src/plugin-main.cpp")
+          Set-Content $cmakePath $cmake -Encoding utf8
+
+          $presetPath = "_obs_template/CMakePresets.json"
+          $preset = Get-Content $presetPath -Raw
+          $preset = $preset.Replace('"ENABLE_FRONTEND_API": false', '"ENABLE_FRONTEND_API": true')
+          $preset = $preset.Replace('"ENABLE_QT": false', '"ENABLE_QT": true')
+          Set-Content $presetPath $preset -Encoding utf8
+
+          $buildspecPath = "_obs_template/buildspec.json"
+          $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
+          $buildspec.name = "obs-ui-scale"
+          $buildspec.displayName = "OBS UI Scale"
+          $buildspec.version = "0.1.0"
+          $buildspec.author = "OBS UI Scale community plugin"
+          $buildspec.website = "https://obsproject.com/"
+          $buildspec.email = "noreply@example.invalid"
+          $buildspec | ConvertTo-Json -Depth 20 | Set-Content $buildspecPath -Encoding utf8
+
+      - name: Build Windows x64 Release
+        working-directory: obs-ui-scale/_obs_template
+        shell: pwsh
+        env:
+          CI: true
+        run: ./.github/scripts/Build-Windows.ps1 -Target x64 -Configuration Release
+
+      - name: Stage plugin install tree
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: |
+          $releaseRoot = Resolve-Path "_obs_template/release/Release"
+          if (Test-Path "stage") { Remove-Item "stage" -Recurse -Force }
+          New-Item -ItemType Directory -Path "stage" | Out-Null
+          Copy-Item "$releaseRoot\*" "stage\" -Recurse -Force
+          $dll = Get-ChildItem "stage" -Recurse -File -Filter "obs-ui-scale.dll" | Select-Object -First 1
+          if (-not $dll) { throw "obs-ui-scale.dll was not found in the OBS template release tree." }
+
+      - name: Locate or install Inno Setup
+        id: inno
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --yes --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found." }
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build Setup.exe installer
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: '& "${{ steps.inno.outputs.iscc }}" "installer\ObsUiScale.iss"'
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        working-directory: obs-ui-scale
+        run: |
+          $file = Get-Item "dist\OBS-UI-Scale-Setup-0.1.0.exe"
+          $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OBS-UI-Scale-Setup-Windows-x64
+          path: |
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.1.0.exe
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-0.1.0.exe.sha256
+          if-no-files-found: error
