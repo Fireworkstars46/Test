@@ -16,6 +16,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare v1.1 sources
+        shell: pwsh
+        working-directory: taskbar-icon-size-tuner
+        run: |
+          $native = Get-Content TaskbarIconHookV10.cpp -Raw
+          $native = $native.Replace('V10', 'V11')
+          $native = $native.Replace('0x54493130', '0x54493131')
+          $native = $native.Replace('0x544C3130', '0x544C3131')
+          $native = $native.Replace('0x54533130', '0x54533131')
+          $native = $native.Replace('if (requested < 1) requested = 1;`r`n    if (requested > 100) requested = 100;', 'if (requested < 20) requested = 16;`r`n    else if (requested < 29) requested = 24;`r`n    else requested = 32;')
+          $native = $native.Replace('RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW', 'RDW_INVALIDATE | RDW_UPDATENOW')
+          Set-Content TaskbarIconHookV11.build.cpp $native -Encoding utf8
+
+          $ui = Get-Content ProgramV10.cs -Raw
+          $ui = $ui.Replace('V10', 'V11')
+          $ui = $ui.Replace('v1.0', 'v1.1')
+          $ui = $ui.Replace('TaskbarIconHook-1.0.dll', 'TaskbarIconHook-1.1.dll')
+          $ui = $ui.Replace('SetupNumber(iconSizeBox, 1, 100, 18, 196, 103, 78);', 'SetupNumber(iconSizeBox, 16, 32, 24, 196, 103, 78);`r`n            iconSizeBox.Increment = 8;')
+          $ui = $ui.Replace('AddLabel("logical px", 282, 106, 9F, false);', 'AddLabel("safe px (16 / 24 / 32)", 282, 106, 9F, false);')
+          $ui = $ui.Replace('v1.1 resizes both the icon image and its real taskbar slot, so smaller values\nmove icons left and make room for more. Changes are live; no Apply button.', 'v1.1 uses Windows-safe icon sizes so icons always render, while the real taskbar slot\ncan still be made narrower to move icons left and fit more. Changes are live.')
+          $ui = $ui.Replace('smallButtons.Text = "Use Windows small taskbar buttons";', 'smallButtons.Text = "Windows small-icon mode (automatic for 16 px)";')
+          $ui = $ui.Replace('Controls.Add(smallButtons);', 'smallButtons.Enabled = false;`r`n            Controls.Add(smallButtons);')
+          $ui = $ui.Replace('disable7ttLarge.Text = "Disable 7+ Taskbar Tweaker w10_large_icons while custom sizing is active";', 'disable7ttLarge.Text = "Keep 7+ Taskbar Tweaker large-icon override off (prevents conflicts)";')
+          $ui = $ui.Replace('disable7ttLarge.Checked = true;', 'disable7ttLarge.Checked = true;`r`n            disable7ttLarge.Enabled = false;')
+          $ui = $ui.Replace('SetNumberIfValid(iconSizeBox, (int)ReadDword(AppKey, "IconSizeV11", ReadDword(AppKey, "HookIconSizeV9", 18)));', 'SetNumberIfValid(iconSizeBox, (int)ReadDword(AppKey, "IconSizeV11", 24));')
+          $oldApply = 'WriteDword(ExplorerAdvancedKey, "TaskbarSmallIcons", smallButtons.Checked ? 1u : 0u);'
+          $newApply = 'int requestedIcon = (int)iconSizeBox.Value;`r`n                int safeIcon = requestedIcon < 20 ? 16 : (requestedIcon < 29 ? 24 : 32);`r`n                loading = true;`r`n                iconSizeBox.Value = safeIcon;`r`n                smallButtons.Checked = safeIcon == 16;`r`n                disable7ttLarge.Checked = true;`r`n                loading = false;`r`n                WriteDword(ExplorerAdvancedKey, "TaskbarSmallIcons", safeIcon == 16 ? 1u : 0u);'
+          $ui = $ui.Replace($oldApply, $newApply)
+          $ui = $ui.Replace('WriteDword(AppKey, "IconSizeV11", (uint)iconSizeBox.Value);', 'WriteDword(AppKey, "IconSizeV11", (uint)safeIcon);')
+          $ui = $ui.Replace('WriteDword(AppKey, "HookEnabledV9", 0);', 'WriteDword(AppKey, "HookEnabledV9", 0);`r`n            WriteDword(AppKey, "HookEnabledV10", 0);')
+          $ui = $ui.Replace('Applied immediately. Icon image + taskbar slot + Search refresh sent.', 'Applied. Safe icon image + compact taskbar slot + Search refresh sent.')
+          $ui = $ui.Replace('Icon redraw is forced immediately now; you should not need to hover over icons to update them.', 'Safe rendering avoids blank/stretched icons. Taskbar redraw is still forced immediately.')
+          Set-Content ProgramV11.build.cs $ui -Encoding utf8
+
       - name: Build native taskbar hook
         shell: pwsh
         working-directory: taskbar-icon-size-tuner
@@ -24,7 +58,7 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $vs) { throw 'Visual Studio C++ tools not found' }
-          $cmd = 'call "' + $vs + '\VC\Auxiliary\Build\vcvars64.bat" && cl /nologo /LD /O2 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 TaskbarIconHookV10.cpp /link /OUT:bin\TaskbarIconHook-1.0.dll user32.lib advapi32.lib comctl32.lib gdi32.lib'
+          $cmd = 'call "' + $vs + '\VC\Auxiliary\Build\vcvars64.bat" && cl /nologo /LD /O2 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 TaskbarIconHookV11.build.cpp /link /OUT:bin\TaskbarIconHook-1.1.dll user32.lib advapi32.lib comctl32.lib gdi32.lib'
           cmd /c $cmd
           if ($LASTEXITCODE -ne 0) { throw 'Native hook compilation failed.' }
 
@@ -67,7 +101,7 @@ jobs:
         run: |
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (-not (Test-Path $csc)) { throw "C# compiler not found at $csc" }
-          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:AppIcon.ico /out:bin\TaskbarIconSizeTuner.exe /resource:bin\TaskbarIconHook-1.0.dll,TaskbarIconHook.dll /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll ProgramV10.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:AppIcon.ico /out:bin\TaskbarIconSizeTuner.exe /resource:bin\TaskbarIconHook-1.1.dll,TaskbarIconHook.dll /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll ProgramV11.build.cs
           if ($LASTEXITCODE -ne 0) { throw "C# compilation failed." }
 
       - name: Locate or install Inno Setup
@@ -89,7 +123,7 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-1.0.0.exe" -Force
+          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-1.1.0.exe" -Force
           Get-ChildItem dist\*.exe | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
@@ -98,10 +132,10 @@ jobs:
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: Taskbar-Icon-Size-Tuner-Windows-x64-v1.0
+          name: Taskbar-Icon-Size-Tuner-Windows-x64-v1.1
           path: |
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-1.0.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-1.0.0.exe.sha256
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-1.0.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-1.0.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-1.1.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-1.1.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-1.1.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-1.1.0.exe.sha256
           if-no-files-found: error
