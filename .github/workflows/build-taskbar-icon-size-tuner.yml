@@ -43,7 +43,6 @@ jobs:
           $g.Clear([System.Drawing.Color]::Transparent)
           $bg = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 35, 125, 210))
           $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-          $g.FillRoundedRectangle = $null
           $g.FillRectangle($bg, 5, 10, 54, 44)
           $g.FillRectangle($white, 12, 18, 40, 6)
           $g.FillRectangle($white, 12, 29, 28, 6)
