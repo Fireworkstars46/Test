@@ -32,26 +32,28 @@ namespace TaskbarIconSizeTuner
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string RunValue = "TaskbarIconSizeTuner";
         private const string HookDllResource = "TaskbarIconHook.dll";
-        private const string HookDllName = "TaskbarIconHook-0.4.dll";
+        private const string HookDllName = "TaskbarIconHook-0.6.dll";
         private const int WH_GETMESSAGE = 3;
         private const uint WM_NULL = 0;
-        private const uint HookRefreshMessage = 0x8000 + 0x4D1;
+        private const uint WM_SETTINGCHANGE = 0x001A;
+        private static readonly IntPtr HWND_BROADCAST = new IntPtr(0xFFFF);
 
         private readonly NumericUpDown sizeBox = new NumericUpDown();
         private readonly CheckBox smallButtons = new CheckBox();
         private readonly CheckBox disable7ttLarge = new CheckBox();
-        private readonly CheckBox closeToTray = new CheckBox();
+        private readonly CheckBox minimizeToTray = new CheckBox();
         private readonly CheckBox startWithWindows = new CheckBox();
         private readonly Label status = new Label();
         private readonly Label diagnostics = new Label();
         private readonly NotifyIcon trayIcon = new NotifyIcon();
-        private readonly Timer watchTimer = new Timer();
+        private readonly System.Windows.Forms.Timer watchTimer = new System.Windows.Forms.Timer();
+        private readonly System.Windows.Forms.Timer liveApplyTimer = new System.Windows.Forms.Timer();
+
         private bool exitRequested;
         private bool loading;
+        private bool restoring;
         private uint lastExplorerThread;
         private readonly bool startupMode;
-
-        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr FindWindow(string className, string windowName);
@@ -63,10 +65,8 @@ namespace TaskbarIconSizeTuner
         private static extern bool UnhookWindowsHookEx(IntPtr hook);
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll")]
-        private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder className, int max);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool SendNotifyMessage(IntPtr hwnd, uint msg, UIntPtr wParam, string lParam);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibrary(string fileName);
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
@@ -77,12 +77,12 @@ namespace TaskbarIconSizeTuner
         public MainForm(bool startup)
         {
             startupMode = startup;
-            Text = "Taskbar Icon Size Tuner v0.4";
+            Text = "Taskbar Icon Size Tuner v0.6";
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = true;
-            ClientSize = new Size(570, 500);
+            ClientSize = new Size(585, 505);
             Font = new Font("Segoe UI", 9F);
 
             try
@@ -93,81 +93,100 @@ namespace TaskbarIconSizeTuner
             catch { }
 
             AddLabel("Windows 10 Taskbar Icon Size Tuner", 18, 14, 14F, true);
-            AddLabel("v0.4 targets the taskbar's own icon-loading calls instead of the old shell metric.\nThe tray/clock is not intentionally resized.", 20, 50, 9F, false);
+            AddLabel("v0.6 uses a smooth TraySettings refresh. It no longer flips Small taskbar buttons\non/off or restarts Explorer for normal size changes.", 20, 50, 9F, false);
 
-            AddLabel("Custom taskbar icon size:", 20, 104, 9F, false);
+            AddLabel("Custom taskbar icon size:", 20, 106, 9F, false);
             sizeBox.Minimum = 1;
             sizeBox.Maximum = 100;
             sizeBox.Value = 20;
             sizeBox.Width = 76;
-            sizeBox.Location = new Point(188, 101);
+            sizeBox.Location = new Point(188, 103);
             Controls.Add(sizeBox);
-            AddLabel("px", 272, 104, 9F, false);
+            AddLabel("px", 272, 106, 9F, false);
 
             smallButtons.Text = "Use Windows small taskbar buttons";
             smallButtons.AutoSize = true;
-            smallButtons.Location = new Point(20, 142);
+            smallButtons.Location = new Point(20, 144);
             Controls.Add(smallButtons);
 
             disable7ttLarge.Text = "Disable 7+ Taskbar Tweaker w10_large_icons while custom sizing is active";
             disable7ttLarge.AutoSize = true;
             disable7ttLarge.Checked = true;
-            disable7ttLarge.Location = new Point(20, 170);
+            disable7ttLarge.Location = new Point(20, 172);
             Controls.Add(disable7ttLarge);
 
-            closeToTray.Text = "Minimize / close to tray and reapply if Explorer restarts";
-            closeToTray.AutoSize = true;
-            closeToTray.Checked = true;
-            closeToTray.Location = new Point(20, 198);
-            Controls.Add(closeToTray);
+            minimizeToTray.Text = "Minimize to tray (X closes the app and restores the default size)";
+            minimizeToTray.AutoSize = true;
+            minimizeToTray.Checked = true;
+            minimizeToTray.Location = new Point(20, 200);
+            Controls.Add(minimizeToTray);
 
             startWithWindows.Text = "Start with Windows";
             startWithWindows.AutoSize = true;
-            startWithWindows.Location = new Point(20, 226);
+            startWithWindows.Location = new Point(20, 228);
             Controls.Add(startWithWindows);
 
-            Button applyRestart = MakeButton("Apply + Restart Explorer", 20, 266, 190);
-            applyRestart.Click += (s, e) => Apply(true);
-            Button applyRefresh = MakeButton("Apply / Refresh", 220, 266, 120);
-            applyRefresh.Click += (s, e) => Apply(false);
-            Button restore = MakeButton("Restore Original", 350, 266, 145);
-            restore.Click += (s, e) => RestoreOriginal();
+            Button apply = MakeButton("Apply Now", 20, 270, 155);
+            apply.Click += (s, e) => ApplyCustom(true);
+            Button restore = MakeButton("Restore Default", 190, 270, 155);
+            restore.Click += (s, e) => RestoreOriginal(true);
 
-            AddLabel("For your setup, keep Small taskbar buttons ON and start around 20-28 px.\nIf a value has no visible effect, the diagnostics below tell us exactly which hook path Windows used.", 20, 316, 9F, false);
+            AddLabel("Live preview is automatic: change the number and the taskbar refreshes after about 0.1 sec.\nClosing the app restores your original taskbar settings without restarting Explorer.", 20, 318, 9F, false);
 
             diagnostics.AutoSize = false;
-            diagnostics.Location = new Point(20, 366);
-            diagnostics.Size = new Size(525, 45);
+            diagnostics.Location = new Point(20, 370);
+            diagnostics.Size = new Size(545, 45);
             diagnostics.Text = "Hook diagnostics: not applied yet.";
             Controls.Add(diagnostics);
 
             status.AutoSize = false;
-            status.Location = new Point(20, 420);
-            status.Size = new Size(525, 58);
+            status.Location = new Point(20, 425);
+            status.Size = new Size(545, 58);
             status.Text = "Ready.";
             Controls.Add(status);
 
             SetupTray();
             LoadSettings();
 
-            smallButtons.CheckedChanged += (s, e) => SavePreferences();
-            disable7ttLarge.CheckedChanged += (s, e) => SavePreferences();
-            closeToTray.CheckedChanged += (s, e) => SavePreferences();
+            liveApplyTimer.Interval = 110;
+            liveApplyTimer.Tick += (s, e) =>
+            {
+                liveApplyTimer.Stop();
+                if (!loading && !restoring)
+                    ApplyCustom(false);
+            };
+
+            sizeBox.ValueChanged += (s, e) => QueueLiveApply();
+            smallButtons.CheckedChanged += (s, e) => { SavePreferences(); QueueLiveApply(); };
+            disable7ttLarge.CheckedChanged += (s, e) => { SavePreferences(); QueueLiveApply(); };
+            minimizeToTray.CheckedChanged += (s, e) => SavePreferences();
             startWithWindows.CheckedChanged += (s, e) => SaveStartup();
             Resize += OnResize;
             FormClosing += OnClosing;
 
-            watchTimer.Interval = 3000;
-            watchTimer.Tick += (s, e) => WatchExplorer();
+            watchTimer.Interval = 900;
+            watchTimer.Tick += (s, e) =>
+            {
+                WatchExplorer();
+                UpdateDiagnostics();
+            };
             watchTimer.Start();
 
             Shown += (s, e) =>
             {
                 if (startupMode)
                 {
-                    if (ReadDword(AppKey, "HookEnabled", 0) != 0)
-                        InstallHookAndRefresh();
-                    HideToTray();
+                    if (ReadDword(AppKey, "HookEnabledV6", 0) != 0)
+                    {
+                        InstallOrRefreshHook(false);
+                        HideToTray();
+                    }
+                    else
+                    {
+                        exitRequested = true;
+                        trayIcon.Visible = false;
+                        Close();
+                    }
                 }
             };
         }
@@ -193,9 +212,9 @@ namespace TaskbarIconSizeTuner
             ContextMenuStrip menu = new ContextMenuStrip();
             ToolStripMenuItem show = new ToolStripMenuItem("Show");
             show.Click += (s, e) => ShowFromTray();
-            ToolStripMenuItem refresh = new ToolStripMenuItem("Reapply taskbar icon size");
-            refresh.Click += (s, e) => { InstallHookAndRefresh(); UpdateDiagnostics(); };
-            ToolStripMenuItem exit = new ToolStripMenuItem("Exit");
+            ToolStripMenuItem refresh = new ToolStripMenuItem("Refresh custom icon size");
+            refresh.Click += (s, e) => ApplyCustom(true);
+            ToolStripMenuItem exit = new ToolStripMenuItem("Exit + restore default");
             exit.Click += (s, e) => ExitApp();
             menu.Items.Add(show);
             menu.Items.Add(refresh);
@@ -213,11 +232,11 @@ namespace TaskbarIconSizeTuner
             loading = true;
             try
             {
-                int saved = (int)ReadDword(AppKey, "HookIconSize", 20);
+                int saved = (int)ReadDword(AppKey, "HookIconSizeV6", ReadDword(AppKey, "HookIconSize", 20));
                 if (saved >= 1 && saved <= 100) sizeBox.Value = saved;
                 smallButtons.Checked = ReadDword(ExplorerAdvancedKey, "TaskbarSmallIcons", 0) != 0;
                 disable7ttLarge.Checked = ReadDword(AppKey, "Disable7ttLarge", 1) != 0;
-                closeToTray.Checked = ReadDword(AppKey, "CloseToTray", 1) != 0;
+                minimizeToTray.Checked = ReadDword(AppKey, "MinimizeToTray", 1) != 0;
                 using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey))
                     startWithWindows.Checked = run != null && run.GetValue(RunValue) != null;
             }
@@ -225,10 +244,17 @@ namespace TaskbarIconSizeTuner
             UpdateDiagnostics();
         }
 
+        private void QueueLiveApply()
+        {
+            if (loading || restoring) return;
+            liveApplyTimer.Stop();
+            liveApplyTimer.Start();
+        }
+
         private void SavePreferences()
         {
             if (loading) return;
-            WriteDword(AppKey, "CloseToTray", closeToTray.Checked ? 1u : 0u);
+            WriteDword(AppKey, "MinimizeToTray", minimizeToTray.Checked ? 1u : 0u);
             WriteDword(AppKey, "Disable7ttLarge", disable7ttLarge.Checked ? 1u : 0u);
         }
 
@@ -248,8 +274,10 @@ namespace TaskbarIconSizeTuner
             catch (Exception ex) { status.Text = "Startup setting error: " + ex.Message; }
         }
 
-        private void Apply(bool restartExplorer)
+        private void ApplyCustom(bool showStatus)
         {
+            if (restoring) return;
+
             try
             {
                 BackupOnce();
@@ -259,41 +287,50 @@ namespace TaskbarIconSizeTuner
                 if (disable7ttLarge.Checked)
                     WriteDword(SevenTtKey, "w10_large_icons", 0);
 
-                WriteDword(AppKey, "HookEnabled", 1);
-                WriteDword(AppKey, "HookIconSize", (uint)sizeBox.Value);
+                // Disable the older v0.3-v0.5 hook if it is still pinned in this Explorer process.
+                WriteDword(AppKey, "HookEnabled", 0);
+                WriteDword(AppKey, "HookEnabledV6", 1);
+                WriteDword(AppKey, "HookIconSizeV6", (uint)sizeBox.Value);
                 WriteDword(AppKey, "Disable7ttLarge", disable7ttLarge.Checked ? 1u : 0u);
-                ClearDiagnostics();
 
-                if (restartExplorer)
-                {
-                    status.Text = "Restarting Explorer and attaching the v0.4 hook...";
-                    RestartExplorer(true);
-                }
-                else
-                {
-                    bool ok = InstallHookAndRefresh();
-                    Thread.Sleep(700);
-                    UpdateDiagnostics();
-                    status.Text = ok ? "Refresh sent. Check the taskbar and diagnostics." : "The hook could not attach.";
-                }
+                bool ok = InstallOrRefreshHook(showStatus);
+                if (showStatus)
+                    status.Text = ok ? "Applied " + sizeBox.Value + " px. No Explorer restart." : "The v0.6 hook could not attach.";
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "Could not apply", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (showStatus)
+                    MessageBox.Show(this, ex.Message, "Could not apply", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                else
+                    status.Text = "Apply error: " + ex.Message;
             }
         }
 
-        private bool InstallHookAndRefresh()
+        private bool InstallOrRefreshHook(bool showStatus)
+        {
+            IntPtr tray = FindWindow("Shell_TrayWnd", null);
+            if (tray == IntPtr.Zero) return false;
+
+            uint pid;
+            uint threadId = GetWindowThreadProcessId(tray, out pid);
+            if (threadId == 0) return false;
+
+            if (threadId != lastExplorerThread)
+            {
+                if (!AttachHook(tray, threadId))
+                    return false;
+                lastExplorerThread = threadId;
+            }
+
+            BroadcastTraySettings();
+            if (showStatus) UpdateDiagnostics();
+            return true;
+        }
+
+        private bool AttachHook(IntPtr tray, uint threadId)
         {
             try
             {
-                IntPtr tray = FindWindow("Shell_TrayWnd", null);
-                if (tray == IntPtr.Zero) return false;
-
-                uint pid;
-                uint threadId = GetWindowThreadProcessId(tray, out pid);
-                if (threadId == 0) return false;
-
                 string dll = EnsureHookDll();
                 IntPtr module = LoadLibrary(dll);
                 if (module == IntPtr.Zero)
@@ -302,25 +339,29 @@ namespace TaskbarIconSizeTuner
                 try
                 {
                     IntPtr proc = GetProcAddress(module, "TunerHookProc");
-                    if (proc == IntPtr.Zero) throw new InvalidOperationException("TunerHookProc export missing");
+                    if (proc == IntPtr.Zero)
+                        throw new InvalidOperationException("TunerHookProc export missing");
+
                     IntPtr hook = SetWindowsHookEx(WH_GETMESSAGE, proc, module, threadId);
                     if (hook == IntPtr.Zero)
-                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the thread hook");
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the taskbar thread hook");
+
                     try
                     {
                         PostMessage(tray, WM_NULL, IntPtr.Zero, IntPtr.Zero);
-                        Thread.Sleep(500);
+                        // Usually completes in a few milliseconds. Keep this short so first apply feels instant.
+                        for (int i = 0; i < 8; i++)
+                        {
+                            Thread.Sleep(15);
+                            if (ReadDword(AppKey, "DiagInjectedV6", 0) == 1)
+                                break;
+                        }
                     }
                     finally { UnhookWindowsHookEx(hook); }
                 }
                 finally { FreeLibrary(module); }
 
-                lastExplorerThread = threadId;
-                IntPtr taskSw = FindDescendantByClass(tray, "MSTaskSwWClass");
-                if (taskSw != IntPtr.Zero)
-                    PostMessage(taskSw, HookRefreshMessage, IntPtr.Zero, IntPtr.Zero);
-                Thread.Sleep(500);
-                return ReadDword(AppKey, "DiagInjected", 0) == 1;
+                return ReadDword(AppKey, "DiagInjectedV6", 0) == 1;
             }
             catch (Exception ex)
             {
@@ -329,27 +370,25 @@ namespace TaskbarIconSizeTuner
             }
         }
 
-        private void UpdateDiagnostics()
+        private static void BroadcastTraySettings()
         {
-            uint injected = ReadDword(AppKey, "DiagInjected", 0);
-            uint taskSw = ReadDword(AppKey, "DiagTaskSwFound", 0);
-            uint mul = ReadDword(AppKey, "DiagMulDivPatched", 0);
-            uint metrics = ReadDword(AppKey, "DiagMetricsPatched", 0);
-            uint metricsDpi = ReadDword(AppKey, "DiagMetricsForDpiPatched", 0);
-            uint mulHits = ReadDword(AppKey, "DiagMulDivHits", 0);
-            uint metricHits = ReadDword(AppKey, "DiagMetricHits", 0);
-            uint refresh = ReadDword(AppKey, "DiagRefreshMessages", 0);
-
-            diagnostics.Text = "Hook diagnostics: Injected=" + injected + "  TaskSw=" + taskSw +
-                               "  MulDiv=" + mul + " (hits " + mulHits + ")  Metrics=" + metrics + "/" + metricsDpi +
-                               " (hits " + metricHits + ")  Refresh=" + refresh;
+            SendNotifyMessage(HWND_BROADCAST, WM_SETTINGCHANGE, UIntPtr.Zero, "TraySettings");
         }
 
-        private void ClearDiagnostics()
+        private void UpdateDiagnostics()
         {
-            string[] names = { "DiagInjected", "DiagTaskSwFound", "DiagMulDivPatched", "DiagMetricsPatched", "DiagMetricsForDpiPatched", "DiagMulDivHits", "DiagMetricHits", "DiagRefreshMessages" };
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(AppKey))
-                foreach (string name in names) key.SetValue(name, 0, RegistryValueKind.DWord);
+            uint injected = ReadDword(AppKey, "DiagInjectedV6", 0);
+            uint traySub = ReadDword(AppKey, "DiagTraySubclassV6", 0);
+            uint mul = ReadDword(AppKey, "DiagMulDivPatchedV6", 0);
+            uint metrics = ReadDword(AppKey, "DiagMetricsPatchedV6", 0);
+            uint metricsDpi = ReadDword(AppKey, "DiagMetricsForDpiPatchedV6", 0);
+            uint mulHits = ReadDword(AppKey, "DiagMulDivHitsV6", 0);
+            uint metricHits = ReadDword(AppKey, "DiagMetricHitsV6", 0);
+            uint refresh = ReadDword(AppKey, "DiagSmoothRefreshesV6", 0);
+
+            diagnostics.Text = "Hook diagnostics: Injected=" + injected + "  Tray=" + traySub +
+                               "  MulDiv=" + mul + " (hits " + mulHits + ")  Metrics=" + metrics + "/" + metricsDpi +
+                               " (hits " + metricHits + ")  Smooth refresh=" + refresh;
         }
 
         private string EnsureHookDll()
@@ -371,66 +410,18 @@ namespace TaskbarIconSizeTuner
             return path;
         }
 
-        private static IntPtr FindDescendantByClass(IntPtr parent, string target)
-        {
-            IntPtr found = IntPtr.Zero;
-            EnumWindowsProc cb = delegate(IntPtr hwnd, IntPtr lp)
-            {
-                System.Text.StringBuilder sb = new System.Text.StringBuilder(96);
-                if (GetClassName(hwnd, sb, sb.Capacity) > 0 && string.Equals(sb.ToString(), target, StringComparison.Ordinal))
-                {
-                    found = hwnd;
-                    return false;
-                }
-                return true;
-            };
-            EnumChildWindows(parent, cb, IntPtr.Zero);
-            GC.KeepAlive(cb);
-            return found;
-        }
-
-        private void RestartExplorer(bool inject)
-        {
-            lastExplorerThread = 0;
-            foreach (Process p in Process.GetProcessesByName("explorer"))
-                try { p.Kill(); } catch { }
-            Thread.Sleep(1200);
-            try { Process.Start("explorer.exe"); } catch { }
-
-            IntPtr tray = IntPtr.Zero;
-            for (int i = 0; i < 50 && tray == IntPtr.Zero; i++)
-            {
-                Thread.Sleep(200);
-                tray = FindWindow("Shell_TrayWnd", null);
-            }
-            if (tray == IntPtr.Zero)
-            {
-                status.Text = "Explorer restarted, but the taskbar has not appeared yet.";
-                return;
-            }
-
-            if (inject)
-            {
-                Thread.Sleep(1400);
-                bool ok = InstallHookAndRefresh();
-                Thread.Sleep(700);
-                UpdateDiagnostics();
-                status.Text = ok ? "v0.4 attached. Check the taskbar and diagnostic counters." : "Explorer restarted, but the hook did not attach.";
-            }
-            else status.Text = "Explorer restarted with original taskbar behavior.";
-        }
-
         private void WatchExplorer()
         {
-            if (ReadDword(AppKey, "HookEnabled", 0) == 0) return;
+            if (ReadDword(AppKey, "HookEnabledV6", 0) == 0) return;
+
             IntPtr tray = FindWindow("Shell_TrayWnd", null);
             if (tray == IntPtr.Zero) return;
             uint pid;
             uint tid = GetWindowThreadProcessId(tray, out pid);
             if (tid != 0 && tid != lastExplorerThread)
             {
-                InstallHookAndRefresh();
-                UpdateDiagnostics();
+                lastExplorerThread = 0;
+                InstallOrRefreshHook(false);
             }
         }
 
@@ -452,7 +443,8 @@ namespace TaskbarIconSizeTuner
             {
                 object v = key == null ? null : key.GetValue(name);
                 backup.SetValue(hadName, v == null ? 0 : 1, RegistryValueKind.DWord);
-                if (v != null) backup.SetValue(valueName, dword ? (object)Convert.ToInt32(v) : v.ToString(), dword ? RegistryValueKind.DWord : RegistryValueKind.String);
+                if (v != null)
+                    backup.SetValue(valueName, dword ? (object)Convert.ToInt32(v) : v.ToString(), dword ? RegistryValueKind.DWord : RegistryValueKind.String);
             }
         }
 
@@ -465,27 +457,39 @@ namespace TaskbarIconSizeTuner
             }
         }
 
-        private void RestoreOriginal()
+        private void RestoreOriginal(bool showStatus)
         {
+            if (restoring) return;
+            restoring = true;
+            liveApplyTimer.Stop();
+
             try
             {
                 using (RegistryKey backup = Registry.CurrentUser.OpenSubKey(AppKey))
                 {
-                    if (backup == null || Convert.ToInt32(backup.GetValue("BackupMade", 0)) != 1)
+                    if (backup != null && Convert.ToInt32(backup.GetValue("BackupMade", 0)) == 1)
                     {
-                        MessageBox.Show(this, "No original backup is available yet.", "Restore Original");
-                        return;
+                        RestoreValue(WindowMetricsKey, "Shell Small Icon Size", backup, "HadShellSmallIconSize", "ShellSmallIconSize", RegistryValueKind.String);
+                        RestoreValue(ExplorerAdvancedKey, "TaskbarSmallIcons", backup, "HadTaskbarSmallIcons", "TaskbarSmallIcons", RegistryValueKind.DWord);
+                        RestoreValue(SevenTtKey, "w10_large_icons", backup, "Had7ttLarge", "7ttLarge", RegistryValueKind.DWord);
                     }
-                    RestoreValue(WindowMetricsKey, "Shell Small Icon Size", backup, "HadShellSmallIconSize", "ShellSmallIconSize", RegistryValueKind.String);
-                    RestoreValue(ExplorerAdvancedKey, "TaskbarSmallIcons", backup, "HadTaskbarSmallIcons", "TaskbarSmallIcons", RegistryValueKind.DWord);
-                    RestoreValue(SevenTtKey, "w10_large_icons", backup, "Had7ttLarge", "7ttLarge", RegistryValueKind.DWord);
                 }
+
                 WriteDword(AppKey, "HookEnabled", 0);
-                ClearDiagnostics();
-                RestartExplorer(false);
-                LoadSettings();
+                WriteDword(AppKey, "HookEnabledV6", 0);
+                BroadcastTraySettings();
+
+                if (showStatus)
+                {
+                    status.Text = "Default/original taskbar size restored. No Explorer restart.";
+                    LoadSettings();
+                }
             }
-            catch (Exception ex) { status.Text = "Restore error: " + ex.Message; }
+            catch (Exception ex)
+            {
+                if (showStatus) status.Text = "Restore error: " + ex.Message;
+            }
+            finally { restoring = false; }
         }
 
         private static void RestoreValue(string path, string name, RegistryKey backup, string hadName, string valueName, RegistryValueKind kind)
@@ -493,7 +497,8 @@ namespace TaskbarIconSizeTuner
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(path))
             {
                 bool had = Convert.ToInt32(backup.GetValue(hadName, 0)) != 0;
-                if (!had) key.DeleteValue(name, false);
+                if (!had)
+                    key.DeleteValue(name, false);
                 else
                 {
                     object value = backup.GetValue(valueName);
@@ -523,16 +528,19 @@ namespace TaskbarIconSizeTuner
 
         private void OnResize(object sender, EventArgs e)
         {
-            if (WindowState == FormWindowState.Minimized && closeToTray.Checked) HideToTray();
+            if (WindowState == FormWindowState.Minimized && minimizeToTray.Checked)
+                HideToTray();
         }
 
         private void OnClosing(object sender, FormClosingEventArgs e)
         {
-            if (!exitRequested && e.CloseReason == CloseReason.UserClosing && closeToTray.Checked)
-            {
-                e.Cancel = true;
-                HideToTray();
-            }
+            if (e.CloseReason == CloseReason.WindowsShutDown)
+                return;
+
+            watchTimer.Stop();
+            liveApplyTimer.Stop();
+            RestoreOriginal(false);
+            trayIcon.Visible = false;
         }
 
         private void HideToTray()
@@ -552,8 +560,6 @@ namespace TaskbarIconSizeTuner
         private void ExitApp()
         {
             exitRequested = true;
-            watchTimer.Stop();
-            trayIcon.Visible = false;
             Close();
         }
 
@@ -562,6 +568,7 @@ namespace TaskbarIconSizeTuner
             if (disposing)
             {
                 watchTimer.Dispose();
+                liveApplyTimer.Dispose();
                 trayIcon.Dispose();
             }
             base.Dispose(disposing);
