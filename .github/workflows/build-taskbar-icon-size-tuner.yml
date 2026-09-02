@@ -45,7 +45,7 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.1.0.exe" -Force
+          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe" -Force
           Get-ChildItem dist\*.exe | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
@@ -54,8 +54,10 @@ jobs:
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: Taskbar-Icon-Size-Tuner-Windows-x64
+          name: Taskbar-Icon-Size-Tuner-Windows-x64-v0.2
           path: |
-            taskbar-icon-size-tuner/dist/*.exe
-            taskbar-icon-size-tuner/dist/*.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.2.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.2.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe.sha256
           if-no-files-found: error
