@@ -26,23 +26,8 @@ jobs:
           $native = $native.Replace('0x544C3130', '0x544C3132')
           $native = $native.Replace('0x54533130', '0x54533132')
           $native = $native.Replace('if (requested < 1) requested = 1;`r`n    if (requested > 100) requested = 100;', 'if (requested < 20) requested = 16;`r`n    else if (requested < 29) requested = 24;`r`n    else requested = 32;')
+          $native = $native.Replace('PatchMainModuleIAT("MulDiv",', 'PatchMainModuleIAT("MulDiv_DISABLED",')
           $native = $native.Replace('RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW', 'RDW_INVALIDATE | RDW_UPDATENOW')
-          $oldMul = @'
-    void* original = NULL;
-    int patched = PatchMainModuleIAT("MulDiv", reinterpret_cast<void*>(&MulDivHook), &original);
-    if (patched > 0)
-    {
-        g_originalMulDiv = reinterpret_cast<MulDivFn>(original);
-        WriteDword(L"DiagMulDivPatchedV12", (DWORD)patched);
-    }
-'@
-          $newMul = @'
-    // v1.2 deliberately does NOT patch Explorer's MulDiv import. Icon image sizing
-    // uses Windows' own 16/24 modes and 7+ Taskbar Tweaker's existing 32px mode.
-    // This avoids the blank/stretched icon rendering seen with custom image sizes.
-    WriteDword(L"DiagMulDivPatchedV12", 0);
-'@
-          $native = $native.Replace($oldMul, $newMul)
           $native = $native.Replace('`r`n', [Environment]::NewLine)
           Set-Content TaskbarIconHookV12.build.cpp $native -Encoding utf8
 
@@ -63,33 +48,7 @@ jobs:
           $ui = $ui.Replace($oldApply, $newApply)
           $ui = $ui.Replace('WriteDword(AppKey, "IconSizeV12", (uint)iconSizeBox.Value);', 'WriteDword(AppKey, "IconSizeV12", (uint)safeIcon);')
           $ui = $ui.Replace('WriteDword(AppKey, "HookEnabledV9", 0);', 'WriteDword(AppKey, "HookEnabledV9", 0);`r`n            WriteDword(AppKey, "HookEnabledV10", 0);`r`n            WriteDword(AppKey, "HookEnabledV11", 0);')
-          $oldSeven = @'
-        private void ApplySevenTtPreference()
-        {
-            if (disable7ttLarge.Checked)
-            {
-                WriteDword(SevenTtKey, "w10_large_icons", 0);
-            }
-            else
-            {
-                using (RegistryKey backup = Registry.CurrentUser.OpenSubKey(AppKey))
-                {
-                    if (backup != null && Convert.ToInt32(backup.GetValue("BackupMadeV12", 0)) == 1)
-                        RestoreValue(SevenTtKey, "w10_large_icons", backup, "Had7ttLargeV12", "7ttLargeV12", RegistryValueKind.DWord);
-                }
-            }
-            ReloadSevenTaskbarTweakerOptionsEx();
-        }
-'@
-          $newSeven = @'
-        private void ApplySevenTtPreference()
-        {
-            int icon = (int)ReadDword(AppKey, "IconSizeV12", 24);
-            WriteDword(SevenTtKey, "w10_large_icons", icon == 32 ? 1u : 0u);
-            ReloadSevenTaskbarTweakerOptionsEx();
-        }
-'@
-          $ui = $ui.Replace($oldSeven, $newSeven)
+          $ui = $ui.Replace('ApplySevenTtPreference();', 'ApplySevenTtPreference();`r`n                WriteDword(SevenTtKey, "w10_large_icons", safeIcon == 32 ? 1u : 0u);`r`n                ReloadSevenTaskbarTweakerOptionsEx();')
           $ui = $ui.Replace('Applied immediately. Icon image + taskbar slot + Search refresh sent.', 'Applied. Native icon mode + compact taskbar slot + Search refresh sent.')
           $ui = $ui.Replace('Icon redraw is forced immediately now; you should not need to hover over icons to update them.', 'v1.2 does not hook icon drawing. Windows/7+ renders the icon image; this tuner only compacts the slot and Search layout.')
           $ui = $ui.Replace('`r`n', [Environment]::NewLine)
@@ -112,13 +71,6 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           Add-Type -AssemblyName System.Drawing
-          Add-Type -TypeDefinition @'
-          using System;
-          using System.Runtime.InteropServices;
-          public static class NativeIconCleanup {
-              [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr hIcon);
-          }
-          '@
           $bmp = New-Object System.Drawing.Bitmap 64,64
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -137,7 +89,6 @@ jobs:
           $fs = [System.IO.File]::Create((Join-Path (Get-Location) 'AppIcon.ico'))
           $icon.Save($fs)
           $fs.Close()
-          [NativeIconCleanup]::DestroyIcon($hIcon) | Out-Null
           $pen.Dispose(); $white.Dispose(); $bg.Dispose(); $g.Dispose(); $bmp.Dispose()
 
       - name: Compile portable EXE
