@@ -1,5 +1,5 @@
 #define MyAppName "Taskbar Icon Size Tuner"
-#define MyAppVersion "0.9.0"
+#define MyAppVersion "1.0.0"
 #define MyAppExeName "TaskbarIconSizeTuner.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ DefaultDirName={autopf}\Taskbar Icon Size Tuner
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=Taskbar-Icon-Size-Tuner-Setup-0.9.0
+OutputBaseFilename=Taskbar-Icon-Size-Tuner-Setup-1.0.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -23,7 +23,7 @@ SetupIconFile=AppIcon.ico
 
 [Files]
 Source: "bin\TaskbarIconSizeTuner.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "bin\TaskbarIconHook-0.9.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "bin\TaskbarIconHook-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
