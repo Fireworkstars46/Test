@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 # Keep all v0.9 behavior, then make the bottom hidden-counter button cooperate
-# with OBS/Qt scaling instead of forcing a hard-coded 72x28 minimum.
+# with OBS/Qt scaling instead of forcing a hard-coded fixed width.
 & ./build-v0.9.ps1
 
 $path = 'src/plugin-main.cpp'
@@ -18,17 +18,16 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 Replace-Required 'static constexpr const char *PLUGIN_VERSION = "0.9.0";' 'static constexpr const char *PLUGIN_VERSION = "1.0.0";' 'plugin version'
 Replace-Required '#include <QSettings>' "#include <QSettings>`n#include <QSizePolicy>" 'QSizePolicy include'
 
+# v0.6+ moved the counter into OBS's real sources toolbar and only keeps a
+# hard-coded minimum width (72 px). Replace that one fixed dimension with a
+# content-driven policy so the text follows whichever OBS UI/text scale is active.
 Replace-Required @'
-            hiddenCountButton_->setMinimumHeight(28);
             hiddenCountButton_->setMinimumWidth(72);
 '@ @'
-            // Let Qt calculate the correct size from the current OBS font/theme.
-            // This keeps "0 hidden" readable when OBS UI Scale makes the interface
-            // smaller or when text/UI are scaled independently.
             hiddenCountButton_->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
             hiddenCountButton_->setMinimumSize(0, 0);
             hiddenCountButton_->setProperty("obsUiScaleCooperative", true);
-'@ 'remove hard-coded hidden button size'
+'@ 'remove hard-coded hidden button width'
 
 Replace-Required @'
         hiddenCountButton_->setText(QStringLiteral("%1 hidden").arg(hiddenCount));
