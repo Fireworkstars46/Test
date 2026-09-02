@@ -16,6 +16,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build native taskbar hook
+        shell: cmd
+        working-directory: taskbar-icon-size-tuner
+        run: |
+          if not exist bin mkdir bin
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSINSTALL=%%i
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /LD /O2 /MT /EHsc /DUNICODE /D_UNICODE TaskbarIconHook.cpp /link /OUT:bin\TaskbarIconHook-0.3.dll user32.lib advapi32.lib comctl32.lib
+
+      - name: Generate app icon
+        shell: pwsh
+        working-directory: taskbar-icon-size-tuner
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeIconCleanup {
+              [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr hIcon);
+          }
+          '@
+          $bmp = New-Object System.Drawing.Bitmap 64,64
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.Clear([System.Drawing.Color]::Transparent)
+          $bg = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 35, 125, 210))
+          $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+          $g.FillRoundedRectangle = $null
+          $g.FillRectangle($bg, 5, 10, 54, 44)
+          $g.FillRectangle($white, 12, 18, 40, 6)
+          $g.FillRectangle($white, 12, 29, 28, 6)
+          $g.FillRectangle($white, 12, 40, 34, 6)
+          $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 3
+          $g.DrawLine($pen, 48, 27, 56, 35)
+          $g.DrawLine($pen, 56, 35, 48, 43)
+          $hIcon = $bmp.GetHicon()
+          $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+          $fs = [System.IO.File]::Create((Join-Path (Get-Location) 'AppIcon.ico'))
+          $icon.Save($fs)
+          $fs.Close()
+          [NativeIconCleanup]::DestroyIcon($hIcon) | Out-Null
+          $pen.Dispose(); $white.Dispose(); $bg.Dispose(); $g.Dispose(); $bmp.Dispose()
+
       - name: Compile portable EXE
         shell: pwsh
         working-directory: taskbar-icon-size-tuner
@@ -23,7 +66,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (-not (Test-Path $csc)) { throw "C# compiler not found at $csc" }
-          & $csc /nologo /target:winexe /platform:x64 /optimize+ /out:bin\TaskbarIconSizeTuner.exe /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll Program.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:AppIcon.ico /out:bin\TaskbarIconSizeTuner.exe /resource:bin\TaskbarIconHook-0.3.dll,TaskbarIconHook.dll /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll Program.cs
           if ($LASTEXITCODE -ne 0) { throw "C# compilation failed." }
 
       - name: Locate or install Inno Setup
@@ -45,7 +88,7 @@ jobs:
         working-directory: taskbar-icon-size-tuner
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe" -Force
+          Copy-Item "bin\TaskbarIconSizeTuner.exe" "dist\Taskbar-Icon-Size-Tuner-Portable-0.3.0.exe" -Force
           Get-ChildItem dist\*.exe | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash *$($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
@@ -54,10 +97,10 @@ jobs:
       - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: Taskbar-Icon-Size-Tuner-Windows-x64-v0.2
+          name: Taskbar-Icon-Size-Tuner-Windows-x64-v0.3
           path: |
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.2.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.2.0.exe.sha256
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe
-            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.2.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.3.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Setup-0.3.0.exe.sha256
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.3.0.exe
+            taskbar-icon-size-tuner/dist/Taskbar-Icon-Size-Tuner-Portable-0.3.0.exe.sha256
           if-no-files-found: error
