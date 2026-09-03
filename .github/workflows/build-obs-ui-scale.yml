@@ -19,7 +19,7 @@ jobs:
       - name: Prepare v2.4 toggleable diagnostic logger
         shell: pwsh
         working-directory: obs-ui-scale
-        run: ./build-v2.4-debug.ps1
+        run: ./build-v2.4-debug-fixed.ps1
 
       - name: Clone official OBS plugin template
         shell: pwsh
