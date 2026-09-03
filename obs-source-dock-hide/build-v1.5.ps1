@@ -19,9 +19,11 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 
 Replace-Required 'static constexpr const char *PLUGIN_VERSION = "1.3.0";' 'static constexpr const char *PLUGIN_VERSION = "1.5.0";' 'plugin version'
 
-# QLabel carries the full visible text while the parent remains a real
-# QToolButton, preserving the native OBS toolbar hover/checked appearance.
-Replace-Required '#include <QLayout>' "#include <QLayout>`n#include <QLabel>" 'QLabel include'
+# QLabel is already part of the plugin source. Add the resize-event include used
+# by the custom OBS-style full-text tool button if it is not already present.
+if (-not $s.Contains('#include <QResizeEvent>')) {
+    Replace-Required '#include <QPointer>' "#include <QPointer>`n#include <QResizeEvent>" 'QResizeEvent include'
+}
 
 $controllerMarker = 'class SourceDockHideController final : public QObject {'
 $controllerPos = $s.IndexOf($controllerMarker)
