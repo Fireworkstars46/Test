@@ -1,17 +1,17 @@
 $ErrorActionPreference = 'Stop'
 
 # v2.7 is based on v2.6. The user's v2.6 trace exposed that the actual repair
-# path only handled OBS_FRONTEND_EVENT_SCENE_CHANGED, while their Studio Mode /
+# path only handled normal program-scene changes, while their Studio Mode /
 # preview clicks emit OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED. Diagnostics
-# already watched both, which is why the trace showed the bug clearly.
+# already watched both, which is why the trace showed the mismatch clearly.
 #
 # Result in v2.6: the compact 223px row was captured correctly, a preview scene
 # switch expanded it to 264px, and because the real guard never armed, the quiet
 # resize watcher misclassified that OBS-driven expansion as a manual drag.
 #
-# v2.7 routes BOTH normal and preview scene changes through the same mixer + dock
-# repair path. It also extends the mixer/row repair passes through the full
-# deferred OBS relayout window and updates the debug header/version text.
+# v2.7 adds a dedicated preview-scene repair path alongside the existing normal
+# scene path. It also extends mixer/row repair through OBS's deferred relayout
+# window and updates the debug header/version text.
 & ./build-v2.6-debug.ps1
 
 $path = 'src/plugin-main.cpp'
@@ -27,17 +27,25 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 
 Replace-Required 'static constexpr const char *PLUGIN_VERSION = "2.6.0-debug";' 'static constexpr const char *PLUGIN_VERSION = "2.7.0-debug";' 'plugin version'
 
-# The real fix: make the production repair handler run for Studio Mode preview
-# changes too. DebugFrontendEvent already handles both, but that was logging only.
-$oldSceneCondition = 'if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {'
-$newSceneCondition = @'
-if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
-            event == OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED) {
-'@
-if (-not $s.Contains($oldSceneCondition)) {
-    throw 'v2.7 could not locate the production SCENE_CHANGED handler condition'
-}
-$s = $s.Replace($oldSceneCondition, $newSceneCondition)
+# The diagnostics hook is guaranteed to exist in v2.6. Add the missing preview
+# repair immediately after it. This does not disturb the existing normal scene
+# handler and avoids depending on its exact formatting.
+Replace-Required @'
+        self->DebugFrontendEvent(event);
+
+        if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+'@ @'
+        self->DebugFrontendEvent(event);
+
+        if (event == OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED) {
+            self->DebugWrite(QStringLiteral("PREVIEW SCENE REPAIR ARMED"));
+            self->ScheduleContextBarRescale(self->currentUiPercent_);
+            self->ScheduleMixerMinimumRestore(self->currentUiPercent_);
+            self->ArmSceneDockGuard();
+        }
+
+        if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+'@ 'add preview scene repair path'
 
 # OBS can defer the actual QMainWindow row expansion for several hundred ms.
 # Keep correcting both the mixer minimum and row through that entire window.
@@ -62,20 +70,6 @@ Replace-Required @'
             });
         }
 '@ 'extend mixer and row repair through deferred relayout'
-
-# Make it obvious in the optional log that the real repair path armed for both
-# scene event types, not merely the diagnostic snapshot path.
-Replace-Required @'
-            self->ScheduleContextBarRescale(self->currentUiPercent_);
-            self->ScheduleMixerMinimumRestore(self->currentUiPercent_);
-            self->ArmSceneDockGuard();
-'@ @'
-            self->DebugWrite(QStringLiteral("SCENE REPAIR ARMED event=%1")
-                                 .arg(self->DebugFrontendEventName(event)));
-            self->ScheduleContextBarRescale(self->currentUiPercent_);
-            self->ScheduleMixerMinimumRestore(self->currentUiPercent_);
-            self->ArmSceneDockGuard();
-'@ 'log real scene repair path'
 
 # Keep the debug file self-identifying instead of retaining the old v2.3 header.
 $s = $s.Replace('OBS UI Scale v2.3 DEBUG LOG', 'OBS UI Scale v2.7 DEBUG LOG')
