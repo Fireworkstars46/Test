@@ -16,10 +16,10 @@ jobs:
       - name: Checkout Source Dock Hide
         uses: actions/checkout@v4
 
-      - name: Patch v1.4 non-eliding hidden counter
+      - name: Patch v1.5 OBS-style counter and all-source hiding
         shell: pwsh
         working-directory: obs-source-dock-hide
-        run: ./build-v1.4.ps1
+        run: ./build-v1.5.ps1
 
       - name: Clone official OBS plugin template
         shell: pwsh
@@ -44,7 +44,7 @@ jobs:
           $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
           $buildspec.name = "source-dock-hide"
           $buildspec.displayName = "Source Dock Hide for OBS"
-          $buildspec.version = "1.4.0"
+          $buildspec.version = "1.5.0"
           $buildspec.author = "Source Dock Hide community plugin"
           $buildspec.website = "https://obsproject.com/"
           $buildspec.email = "noreply@example.invalid"
@@ -87,15 +87,15 @@ jobs:
         shell: pwsh
         working-directory: obs-source-dock-hide
         run: |
-          $file = Get-Item "dist\Source-Dock-Hide-Setup-1.4.0.exe"
+          $file = Get-Item "dist\Source-Dock-Hide-Setup-1.5.0.exe"
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Source-Dock-Hide-Setup-Windows-x64-v1.4
+          name: Source-Dock-Hide-Setup-Windows-x64-v1.5
           path: |
-            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-1.4.0.exe
-            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-1.4.0.exe.sha256
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-1.5.0.exe
+            obs-source-dock-hide/dist/Source-Dock-Hide-Setup-1.5.0.exe.sha256
           if-no-files-found: error
