@@ -16,10 +16,10 @@ jobs:
       - name: Checkout OBS UI Scale
         uses: actions/checkout@v4
 
-      - name: Prepare v1.5 persistent dock height lock
+      - name: Prepare v1.6 captured compact dock row guard
         shell: pwsh
         working-directory: obs-ui-scale
-        run: ./build-v1.5.ps1
+        run: ./build-v1.6.ps1
 
       - name: Clone official OBS plugin template
         shell: pwsh
@@ -47,7 +47,7 @@ jobs:
           $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
           $buildspec.name = "obs-ui-scale"
           $buildspec.displayName = "OBS UI Scale"
-          $buildspec.version = "1.5.0"
+          $buildspec.version = "1.6.0"
           $buildspec.author = "OBS UI Scale community plugin"
           $buildspec.website = "https://obsproject.com/"
           $buildspec.email = "noreply@example.invalid"
@@ -90,15 +90,15 @@ jobs:
         shell: pwsh
         working-directory: obs-ui-scale
         run: |
-          $file = Get-Item "dist\OBS-UI-Scale-Setup-1.5.0.exe"
+          $file = Get-Item "dist\OBS-UI-Scale-Setup-1.6.0.exe"
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: OBS-UI-Scale-Setup-Windows-x64-v1.5
+          name: OBS-UI-Scale-Setup-Windows-x64-v1.6
           path: |
-            obs-ui-scale/dist/OBS-UI-Scale-Setup-1.5.0.exe
-            obs-ui-scale/dist/OBS-UI-Scale-Setup-1.5.0.exe.sha256
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-1.6.0.exe
+            obs-ui-scale/dist/OBS-UI-Scale-Setup-1.6.0.exe.sha256
           if-no-files-found: error
