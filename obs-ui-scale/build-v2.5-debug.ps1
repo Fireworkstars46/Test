@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 # v2.5 keeps the logging checkbox and only takes quiet timed snapshots around
 # Apply and frontend scene-change events. Snapshot summaries also avoid calling
 # sizeHint()/minimumSizeHint()/layout sizeHint(), which can trigger layout work.
-& ./build-v2.4-debug.ps1
+& ./build-v2.4-debug-fixed.ps1
 
 $path = 'src/plugin-main.cpp'
 $s = Get-Content $path -Raw
@@ -90,7 +90,7 @@ Replace-Required @'
 '@ 'defer initial snapshot'
 
 Replace-Required 'dialog.setWindowTitle(QStringLiteral("OBS UI Scale v2.4 DEBUG"));' 'dialog.setWindowTitle(QStringLiteral("OBS UI Scale v2.5 DEBUG"));' 'dialog title'
-$s = $s.Replace('v2.4 DEBUG keeps the v2.2 behavior and adds optional dock/mixer diagnostics. Use Enable debug logging only when you need a trace.',
+$s = $s.Replace('v2.4 DEBUG keeps the v2.2 behavior and adds optional dock/mixer diagnostics. Enable logging only when you need a trace.',
                 'v2.5 DEBUG keeps the v2.2 behavior with safer optional diagnostics. Logging uses timed Apply/scene snapshots only, not low-level Qt resize events.')
 
 Set-Content $path $s -Encoding utf8
