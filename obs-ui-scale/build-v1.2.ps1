@@ -20,14 +20,11 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 Replace-Required 'static constexpr const char *PLUGIN_VERSION = "1.1.0";' 'static constexpr const char *PLUGIN_VERSION = "1.2.0";' 'plugin version'
 
 Replace-Required @'
-    static void FrontendEvent(enum obs_frontend_event event, void *privateData)
-    {
-        auto *self = static_cast<ObsUiScaleController *>(privateData);
-        if (!self)
-            return;
-
         if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
             QTimer::singleShot(150, self, [self]() {
+                if (self->startupApplyDone_)
+                    return;
+                self->startupApplyDone_ = true;
                 self->CaptureBaselineIfNeeded();
                 self->EnsureEmergencyShortcut();
                 if (self->autoApply_)
@@ -35,15 +32,14 @@ Replace-Required @'
             });
         }
     }
-'@ @'
-    static void FrontendEvent(enum obs_frontend_event event, void *privateData)
-    {
-        auto *self = static_cast<ObsUiScaleController *>(privateData);
-        if (!self)
-            return;
 
+    static int ScaledLength(int value, double percent)
+'@ @'
         if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
             QTimer::singleShot(150, self, [self]() {
+                if (self->startupApplyDone_)
+                    return;
+                self->startupApplyDone_ = true;
                 self->CaptureBaselineIfNeeded();
                 self->EnsureEmergencyShortcut();
                 if (self->autoApply_)
@@ -57,7 +53,7 @@ Replace-Required @'
             event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
             // OBS can relayout its dock area while changing scenes. Reassert only
             // the already-scaled dock geometry, rather than reapplying the whole
-            // theme/widget tree. A zero-delay pass normally lands before repaint;
+            // theme/widget tree. The zero-delay pass normally lands before paint;
             // the short follow-up catches late QMainWindow layout work.
             const double ui = self->currentUiPercent_;
             QTimer::singleShot(0, self, [self, ui]() {
@@ -70,6 +66,8 @@ Replace-Required @'
             });
         }
     }
+
+    static int ScaledLength(int value, double percent)
 '@ 'persist dock geometry after scene changes'
 
 Replace-Required 'dialog.setWindowTitle(QStringLiteral("OBS UI Scale v1.1"));' 'dialog.setWindowTitle(QStringLiteral("OBS UI Scale v1.2"));' 'dialog title'
