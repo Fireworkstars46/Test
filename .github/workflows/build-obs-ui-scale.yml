@@ -19,7 +19,7 @@ jobs:
       - name: Prepare v2.8 scene-row lock and no-flash repair
         shell: pwsh
         working-directory: obs-ui-scale
-        run: ./build-v2.8-debug.ps1
+        run: ./build-v2.8-fixed.ps1
 
       - name: Clone official OBS plugin template
         shell: pwsh
