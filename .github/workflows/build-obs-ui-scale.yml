@@ -16,10 +16,10 @@ jobs:
       - name: Checkout OBS UI Scale
         uses: actions/checkout@v4
 
-      - name: Prepare v2.8 scene-row lock and no-flash repair
+      - name: Prepare v2.9 adjustable minimum scene rows
         shell: pwsh
         working-directory: obs-ui-scale
-        run: ./build-v2.8-fixed.ps1
+        run: ./build-v2.9-debug.ps1
 
       - name: Clone official OBS plugin template
         shell: pwsh
@@ -47,7 +47,7 @@ jobs:
           $buildspec = Get-Content $buildspecPath -Raw | ConvertFrom-Json
           $buildspec.name = "obs-ui-scale"
           $buildspec.displayName = "OBS UI Scale"
-          $buildspec.version = "2.8.0"
+          $buildspec.version = "2.9.0"
           $buildspec.author = "OBS UI Scale community plugin"
           $buildspec.website = "https://obsproject.com/"
           $buildspec.email = "noreply@example.invalid"
@@ -90,15 +90,15 @@ jobs:
         shell: pwsh
         working-directory: obs-ui-scale
         run: |
-          $file = Get-Item "dist\OBS-UI-Scale-Debug-Setup-2.8.0.exe"
+          $file = Get-Item "dist\OBS-UI-Scale-Debug-Setup-2.9.0.exe"
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash *$($file.Name)" | Set-Content "$($file.FullName).sha256" -Encoding ascii
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: OBS-UI-Scale-Debug-Setup-Windows-x64-v2.8
+          name: OBS-UI-Scale-Debug-Setup-Windows-x64-v2.9
           path: |
-            obs-ui-scale/dist/OBS-UI-Scale-Debug-Setup-2.8.0.exe
-            obs-ui-scale/dist/OBS-UI-Scale-Debug-Setup-2.8.0.exe.sha256
+            obs-ui-scale/dist/OBS-UI-Scale-Debug-Setup-2.9.0.exe
+            obs-ui-scale/dist/OBS-UI-Scale-Debug-Setup-2.9.0.exe.sha256
           if-no-files-found: error
