@@ -102,37 +102,27 @@ $startupHelper = @'
 '@
 $s = $s.Substring(0, $frontendPos) + $startupHelper + $s.Substring($frontendPos)
 
-Replace-Required @'
-        QTimer::singleShot(900, this, [this]() {
-            CaptureBaselineIfNeeded();
-            EnsureEmergencyShortcut();
-            if (autoApply_)
-                ApplyScale(uiPercent_, textPercent_);
-        });
-'@ @'
-        QTimer::singleShot(900, this, [this]() {
-            CaptureBaselineIfNeeded();
-            EnsureEmergencyShortcut();
-            if (autoApply_)
-                ScheduleStartupAutoApply();
-        });
-'@ 'constructor startup auto-Apply wait'
+# Earlier builds have changed the startup delay over time, so patch only the
+# constructor's actual ApplyScale call instead of depending on a specific timer.
+$ctorStart = $s.IndexOf('    ObsUiScaleController()')
+$ctorEnd = $s.IndexOf('    ~ObsUiScaleController()', $ctorStart)
+if ($ctorStart -lt 0 -or $ctorEnd -lt 0) { throw 'v3.5 could not locate constructor block' }
+$ctorBlock = $s.Substring($ctorStart, $ctorEnd - $ctorStart)
+$ctorApply = 'ApplyScale(uiPercent_, textPercent_);'
+if (-not $ctorBlock.Contains($ctorApply)) { throw 'v3.5 constructor ApplyScale call not found' }
+$ctorBlock = $ctorBlock.Replace($ctorApply, 'ScheduleStartupAutoApply();')
+$s = $s.Substring(0, $ctorStart) + $ctorBlock + $s.Substring($ctorEnd)
 
-Replace-Required @'
-            QTimer::singleShot(150, self, [self]() {
-                self->CaptureBaselineIfNeeded();
-                self->EnsureEmergencyShortcut();
-                if (self->autoApply_)
-                    self->ApplyScale(self->uiPercent_, self->textPercent_);
-            });
-'@ @'
-            QTimer::singleShot(150, self, [self]() {
-                self->CaptureBaselineIfNeeded();
-                self->EnsureEmergencyShortcut();
-                if (self->autoApply_)
-                    self->ScheduleStartupAutoApply();
-            });
-'@ 'finished-loading auto-Apply wait'
+# Do the same for OBS_FRONTEND_EVENT_FINISHED_LOADING's automatic Apply.
+$frontendStart = $s.IndexOf($frontendMarker)
+$scaledMarker = '    static int ScaledLength(int value, double percent)'
+$frontendEnd = $s.IndexOf($scaledMarker, $frontendStart)
+if ($frontendStart -lt 0 -or $frontendEnd -lt 0) { throw 'v3.5 could not isolate FrontendEvent block' }
+$frontendBlock = $s.Substring($frontendStart, $frontendEnd - $frontendStart)
+$frontendApply = 'self->ApplyScale(self->uiPercent_, self->textPercent_);'
+if (-not $frontendBlock.Contains($frontendApply)) { throw 'v3.5 finished-loading ApplyScale call not found' }
+$frontendBlock = $frontendBlock.Replace($frontendApply, 'self->ScheduleStartupAutoApply();')
+$s = $s.Substring(0, $frontendStart) + $frontendBlock + $s.Substring($frontendEnd)
 
 # Add a second safety check directly inside the scene-row calculation. This is
 # deliberately narrow: it only rejects the startup placeholder/hidden/non-Bottom
