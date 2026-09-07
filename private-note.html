@@ -4,15 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet" />
+  <meta name="referrer" content="no-referrer" />
   <title>Private Account Note</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: Canvas; color: CanvasText; }
-    .card { width: min(620px, 100%); border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 18px; padding: 20px; box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 10%, transparent); }
+    .card { width: min(640px, 100%); border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 18px; padding: 20px; box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 10%, transparent); }
     h1 { font-size: 1.35rem; margin: 0 0 8px; }
-    p { line-height: 1.45; opacity: .78; }
-    textarea { width: 100%; min-height: 220px; resize: vertical; padding: 14px; font: inherit; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; }
+    p { line-height: 1.45; opacity: .8; }
+    textarea, input[type="password"] { width: 100%; padding: 14px; font: inherit; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; }
+    textarea { min-height: 220px; resize: vertical; }
+    label.field { display: block; margin-top: 13px; font-weight: 600; }
+    label.field span { display: block; margin-bottom: 6px; }
+    label.check { display: flex; gap: 9px; align-items: center; margin-top: 13px; font-weight: 600; }
     .note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 1.05rem; line-height: 1.55; padding: 14px 2px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
     button { border: 0; border-radius: 12px; padding: 11px 15px; font: inherit; font-weight: 600; cursor: pointer; }
@@ -20,83 +25,291 @@
     button.secondary { background: color-mix(in srgb, CanvasText 10%, Canvas); color: CanvasText; }
     button.danger { background: color-mix(in srgb, #c00 15%, Canvas); color: CanvasText; }
     .small { font-size: .86rem; opacity: .68; }
+    .status { margin-top: 12px; min-height: 1.2em; font-size: .9rem; }
+    .error { color: #d33; opacity: 1; }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
   <main class="card">
-    <section id="setup" class="hidden">
-      <h1>Set up this device</h1>
-      <p>This page has no account login. Your note is stored only in this browser's private site storage on this device. Nothing you type here is saved in GitHub, the page source, Notes, Files, or Photos.</p>
+    <section id="create" class="hidden">
+      <h1>Create private note link</h1>
+      <p>Your note is encrypted in your browser before it becomes part of the link. GitHub Pages receives only the normal page request; the encrypted part after <b>#</b> stays in the browser.</p>
       <textarea id="editor" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Example:
 Fireworkstars46 — email@example.com
 Fireworkstars44 — other@example.com"></textarea>
-      <div class="row">
-        <button class="primary" id="save">Save on this device</button>
-      </div>
-      <p class="small">After saving once, opening this same link in this same browser goes straight to the note. Anyone opening the link on another device/browser sees only the setup screen, not your note.</p>
+      <label class="field"><span>Password</span><input id="newPassword" type="password" autocomplete="new-password" /></label>
+      <label class="field"><span>Confirm password</span><input id="confirmPassword" type="password" autocomplete="new-password" /></label>
+      <label class="check"><input id="rememberCreate" type="checkbox" checked /> Open instantly on this browser/device</label>
+      <div class="row"><button class="primary" id="createLink">Create private link</button></div>
+      <div id="createStatus" class="status"></div>
+      <p class="small">Use a password you do not use anywhere else. If you edit the note later, a new encrypted link is created and you will need to replace the old link in your Roblox bio.</p>
+    </section>
+
+    <section id="unlock" class="hidden">
+      <h1>Private Account Note</h1>
+      <p>This link contains an encrypted note. Enter its password to unlock it.</p>
+      <label class="field"><span>Password</span><input id="unlockPassword" type="password" autocomplete="current-password" /></label>
+      <label class="check"><input id="rememberUnlock" type="checkbox" checked /> Remember this browser/device</label>
+      <div class="row"><button class="primary" id="unlockButton">Unlock</button></div>
+      <div id="unlockStatus" class="status"></div>
     </section>
 
     <section id="viewer" class="hidden">
       <h1>Private Account Note</h1>
       <div id="note" class="note"></div>
       <div class="row">
+        <button class="primary" id="copyLink">Copy private link</button>
         <button class="secondary" id="edit">Edit</button>
-        <button class="danger" id="clear">Clear this device</button>
+        <button class="secondary" id="lock">Require password next time</button>
       </div>
-      <p class="small">Stored only in this browser on this device. Clearing browser/site data or switching browsers removes access here.</p>
+      <div id="viewerStatus" class="status"></div>
+      <p class="small">The note is AES-GCM encrypted. If this browser remembers the key, this device opens it instantly. Other devices need the password. Anyone with access to this unlocked browser can also view it.</p>
     </section>
   </main>
 
   <script>
     (() => {
       'use strict';
-      const KEY = 'fs46_private_account_note_v1';
-      const setup = document.getElementById('setup');
+
+      const LEGACY_KEY = 'fs46_private_account_note_v1';
+      const REMEMBER_PREFIX = 'fs46_private_note_key_v2_';
+      const ITERATIONS = 310000;
+
+      const create = document.getElementById('create');
+      const unlock = document.getElementById('unlock');
       const viewer = document.getElementById('viewer');
       const editor = document.getElementById('editor');
+      const newPassword = document.getElementById('newPassword');
+      const confirmPassword = document.getElementById('confirmPassword');
+      const rememberCreate = document.getElementById('rememberCreate');
+      const createLink = document.getElementById('createLink');
+      const createStatus = document.getElementById('createStatus');
+      const unlockPassword = document.getElementById('unlockPassword');
+      const rememberUnlock = document.getElementById('rememberUnlock');
+      const unlockButton = document.getElementById('unlockButton');
+      const unlockStatus = document.getElementById('unlockStatus');
       const note = document.getElementById('note');
-      const save = document.getElementById('save');
+      const copyLink = document.getElementById('copyLink');
       const edit = document.getElementById('edit');
-      const clear = document.getElementById('clear');
+      const lock = document.getElementById('lock');
+      const viewerStatus = document.getElementById('viewerStatus');
 
-      function getSaved() {
-        try { return localStorage.getItem(KEY); } catch { return null; }
+      let currentPayload = null;
+      let currentText = '';
+      let currentId = null;
+
+      const enc = new TextEncoder();
+      const dec = new TextDecoder();
+
+      function showOnly(section) {
+        [create, unlock, viewer].forEach(x => x.classList.add('hidden'));
+        section.classList.remove('hidden');
       }
 
-      function showSetup(value = '') {
-        viewer.classList.add('hidden');
-        setup.classList.remove('hidden');
-        editor.value = value;
-        editor.focus();
+      function setStatus(el, text, isError = false) {
+        el.textContent = text || '';
+        el.classList.toggle('error', !!isError);
       }
 
-      function showViewer(value) {
-        setup.classList.add('hidden');
-        viewer.classList.remove('hidden');
-        note.textContent = value;
+      function bytesToB64url(bytes) {
+        let s = '';
+        for (const b of bytes) s += String.fromCharCode(b);
+        return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
       }
 
-      const saved = getSaved();
-      if (saved !== null) showViewer(saved);
-      else showSetup();
+      function b64urlToBytes(s) {
+        s = s.replace(/-/g, '+').replace(/_/g, '/');
+        while (s.length % 4) s += '=';
+        const raw = atob(s);
+        return Uint8Array.from(raw, c => c.charCodeAt(0));
+      }
 
-      save.addEventListener('click', () => {
+      async function deriveKey(password, salt, extractable = true) {
+        const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+        return crypto.subtle.deriveKey(
+          { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: ITERATIONS },
+          baseKey,
+          { name: 'AES-GCM', length: 256 },
+          extractable,
+          ['encrypt', 'decrypt']
+        );
+      }
+
+      async function payloadId(payload) {
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(payload)));
+        return bytesToB64url(digest.slice(0, 18));
+      }
+
+      function parsePayloadFromHash() {
+        const h = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
+        if (!h.startsWith('pn2.')) return null;
+        const parts = h.split('.');
+        if (parts.length !== 4) return null;
         try {
-          localStorage.setItem(KEY, editor.value);
+          return {
+            raw: h,
+            salt: b64urlToBytes(parts[1]),
+            iv: b64urlToBytes(parts[2]),
+            cipher: b64urlToBytes(parts[3])
+          };
+        } catch { return null; }
+      }
+
+      async function encryptText(text, password) {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await deriveKey(password, salt, true);
+        const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(text)));
+        const raw = `pn2.${bytesToB64url(salt)}.${bytesToB64url(iv)}.${bytesToB64url(cipher)}`;
+        const rawKey = new Uint8Array(await crypto.subtle.exportKey('raw', key));
+        return { raw, rawKey };
+      }
+
+      async function decryptWithPassword(payload, password) {
+        const key = await deriveKey(password, payload.salt, false);
+        const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: payload.iv }, key, payload.cipher);
+        return dec.decode(clear);
+      }
+
+      async function decryptWithRawKey(payload, rawKeyBytes) {
+        const key = await crypto.subtle.importKey('raw', rawKeyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+        const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: payload.iv }, key, payload.cipher);
+        return dec.decode(clear);
+      }
+
+      async function rememberKey(payloadRaw, rawKeyBytes) {
+        const id = await payloadId(payloadRaw);
+        localStorage.setItem(REMEMBER_PREFIX + id, bytesToB64url(rawKeyBytes));
+        return id;
+      }
+
+      async function forgetRememberedKey() {
+        if (!currentId) return;
+        try { localStorage.removeItem(REMEMBER_PREFIX + currentId); } catch {}
+      }
+
+      function showViewer(text) {
+        currentText = text;
+        note.textContent = text;
+        setStatus(viewerStatus, '');
+        showOnly(viewer);
+      }
+
+      function showCreate(prefill = '') {
+        editor.value = prefill;
+        newPassword.value = '';
+        confirmPassword.value = '';
+        setStatus(createStatus, '');
+        showOnly(create);
+      }
+
+      function showUnlock() {
+        unlockPassword.value = '';
+        setStatus(unlockStatus, '');
+        showOnly(unlock);
+        unlockPassword.focus();
+      }
+
+      async function openFromHash() {
+        currentPayload = parsePayloadFromHash();
+        if (!currentPayload) {
+          let legacy = '';
+          try { legacy = localStorage.getItem(LEGACY_KEY) || ''; } catch {}
+          showCreate(legacy);
+          return;
+        }
+
+        currentId = await payloadId(currentPayload.raw);
+        let remembered = null;
+        try { remembered = localStorage.getItem(REMEMBER_PREFIX + currentId); } catch {}
+        if (remembered) {
+          try {
+            const text = await decryptWithRawKey(currentPayload, b64urlToBytes(remembered));
+            showViewer(text);
+            return;
+          } catch {
+            try { localStorage.removeItem(REMEMBER_PREFIX + currentId); } catch {}
+          }
+        }
+        showUnlock();
+      }
+
+      createLink.addEventListener('click', async () => {
+        setStatus(createStatus, '');
+        const password = newPassword.value;
+        if (password.length < 6) return setStatus(createStatus, 'Use at least 6 characters for the password.', true);
+        if (password !== confirmPassword.value) return setStatus(createStatus, 'The passwords do not match.', true);
+        if (!editor.value.trim()) return setStatus(createStatus, 'Enter something in the note first.', true);
+
+        createLink.disabled = true;
+        setStatus(createStatus, 'Encrypting…');
+        try {
+          const result = await encryptText(editor.value, password);
+          location.hash = result.raw;
+          currentPayload = parsePayloadFromHash();
+          currentId = await payloadId(result.raw);
+          if (rememberCreate.checked) await rememberKey(result.raw, result.rawKey);
+          try { localStorage.removeItem(LEGACY_KEY); } catch {}
           showViewer(editor.value);
-        } catch {
-          alert('This browser blocked local storage. Try opening the page in Safari, Chrome, or Samsung Internet instead of a private/incognito tab.');
+        } catch (e) {
+          setStatus(createStatus, 'Could not create the encrypted link in this browser.', true);
+        } finally {
+          createLink.disabled = false;
+          newPassword.value = '';
+          confirmPassword.value = '';
         }
       });
 
-      edit.addEventListener('click', () => showSetup(getSaved() ?? ''));
-
-      clear.addEventListener('click', () => {
-        if (!confirm('Remove the private note from this browser on this device?')) return;
-        try { localStorage.removeItem(KEY); } catch {}
-        showSetup();
+      unlockButton.addEventListener('click', async () => {
+        if (!currentPayload) return;
+        setStatus(unlockStatus, 'Unlocking…');
+        unlockButton.disabled = true;
+        try {
+          const key = await deriveKey(unlockPassword.value, currentPayload.salt, true);
+          const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: currentPayload.iv }, key, currentPayload.cipher);
+          const text = dec.decode(clear);
+          if (rememberUnlock.checked) {
+            const rawKey = new Uint8Array(await crypto.subtle.exportKey('raw', key));
+            await rememberKey(currentPayload.raw, rawKey);
+          }
+          showViewer(text);
+          unlockPassword.value = '';
+        } catch {
+          setStatus(unlockStatus, 'Wrong password, or this link is damaged.', true);
+        } finally {
+          unlockButton.disabled = false;
+        }
       });
+
+      unlockPassword.addEventListener('keydown', e => {
+        if (e.key === 'Enter') unlockButton.click();
+      });
+
+      copyLink.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(location.href);
+          setStatus(viewerStatus, 'Private link copied.');
+        } catch {
+          setStatus(viewerStatus, 'Could not copy automatically. Copy the address from the browser bar.', true);
+        }
+      });
+
+      edit.addEventListener('click', () => showCreate(currentText));
+
+      lock.addEventListener('click', async () => {
+        await forgetRememberedKey();
+        showUnlock();
+      });
+
+      window.addEventListener('hashchange', openFromHash);
+
+      if (!window.crypto || !crypto.subtle) {
+        document.body.innerHTML = '<main class="card"><h1>Unsupported browser</h1><p>Open this page in a current version of Samsung Internet, Chrome, Safari, or Edge.</p></main>';
+        return;
+      }
+
+      openFromHash();
     })();
   </script>
 </body>
