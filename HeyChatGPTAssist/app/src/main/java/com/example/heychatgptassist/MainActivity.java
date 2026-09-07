@@ -5,19 +5,25 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Insets;
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.graphics.Typeface;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import rikka.shizuku.Shizuku;
 
@@ -33,19 +39,92 @@ public class MainActivity extends Activity {
 
     public static final String KEY_TRIGGER_DELAY_MS = "trigger_delay_ms";
     public static final int DEFAULT_TRIGGER_DELAY_MS = 100;
-    public static final int MAX_TRIGGER_DELAY_MS = 1000;
+    public static final int MAX_TRIGGER_DELAY_MS = 5000;
 
     public static final String KEY_REARM_DELAY_MS = "rearm_delay_ms";
     public static final int DEFAULT_REARM_DELAY_MS = 500;
     public static final int MAX_REARM_DELAY_MS = 5000;
+
+    public static final String KEY_INITIAL_LISTEN_DELAY_MS = "initial_listen_delay_ms";
+    public static final int DEFAULT_INITIAL_LISTEN_DELAY_MS = 100;
+    public static final int MAX_INITIAL_LISTEN_DELAY_MS = 5000;
+
+    public static final String KEY_RESTART_DELAY_MS = "restart_delay_ms";
+    public static final int DEFAULT_RESTART_DELAY_MS = 100;
+    public static final int MAX_RESTART_DELAY_MS = 5000;
+
+    public static final String KEY_BUSY_RETRY_DELAY_MS = "busy_retry_delay_ms";
+    public static final int DEFAULT_BUSY_RETRY_DELAY_MS = 100;
+    public static final int MAX_BUSY_RETRY_DELAY_MS = 5000;
+
+    public static final String KEY_RATE_LIMIT_RETRY_DELAY_MS = "rate_limit_retry_delay_ms";
+    public static final int DEFAULT_RATE_LIMIT_RETRY_DELAY_MS = 250;
+    public static final int MAX_RATE_LIMIT_RETRY_DELAY_MS = 10000;
+
+    public static final String KEY_COMPLETE_SILENCE_MS = "complete_silence_ms";
+    public static final int DEFAULT_COMPLETE_SILENCE_MS = 3500;
+    public static final int MAX_COMPLETE_SILENCE_MS = 15000;
+
+    public static final String KEY_POSSIBLY_COMPLETE_SILENCE_MS = "possibly_complete_silence_ms";
+    public static final int DEFAULT_POSSIBLY_COMPLETE_SILENCE_MS = 1800;
+    public static final int MAX_POSSIBLY_COMPLETE_SILENCE_MS = 15000;
+
+    public static final String KEY_MIN_SPEECH_MS = "min_speech_ms";
+    public static final int DEFAULT_MIN_SPEECH_MS = 500;
+    public static final int MAX_MIN_SPEECH_MS = 10000;
+
+    private static class TimingSpec {
+        final String key;
+        final String label;
+        final int defaultValue;
+        final int maxValue;
+        final String help;
+
+        TimingSpec(String key, String label, int defaultValue, int maxValue, String help) {
+            this.key = key;
+            this.label = label;
+            this.defaultValue = defaultValue;
+            this.maxValue = maxValue;
+            this.help = help;
+        }
+    }
+
+    private static final TimingSpec[] TIMING_SPECS = new TimingSpec[] {
+            new TimingSpec(KEY_TRIGGER_DELAY_MS,
+                    "Assistant trigger delay (ms)", DEFAULT_TRIGGER_DELAY_MS, MAX_TRIGGER_DELAY_MS,
+                    "Delay between hearing the wake phrase and sending the Assist key. 0 = immediate."),
+            new TimingSpec(KEY_REARM_DELAY_MS,
+                    "Re-arm after assistant opens (ms)", DEFAULT_REARM_DELAY_MS, MAX_REARM_DELAY_MS,
+                    "How soon the wake listener starts trying again after opening ChatGPT. 0 = immediate."),
+            new TimingSpec(KEY_INITIAL_LISTEN_DELAY_MS,
+                    "Initial listener start delay (ms)", DEFAULT_INITIAL_LISTEN_DELAY_MS, MAX_INITIAL_LISTEN_DELAY_MS,
+                    "Delay before the first microphone listening session starts."),
+            new TimingSpec(KEY_RESTART_DELAY_MS,
+                    "Normal listener restart delay (ms)", DEFAULT_RESTART_DELAY_MS, MAX_RESTART_DELAY_MS,
+                    "Delay after a normal timeout or no-match before listening starts again."),
+            new TimingSpec(KEY_BUSY_RETRY_DELAY_MS,
+                    "Microphone/recognizer busy retry (ms)", DEFAULT_BUSY_RETRY_DELAY_MS, MAX_BUSY_RETRY_DELAY_MS,
+                    "Retry delay when Android temporarily says the microphone or recognizer is busy."),
+            new TimingSpec(KEY_RATE_LIMIT_RETRY_DELAY_MS,
+                    "Too-many-requests retry (ms)", DEFAULT_RATE_LIMIT_RETRY_DELAY_MS, MAX_RATE_LIMIT_RETRY_DELAY_MS,
+                    "Backoff used when Android speech recognition reports too many requests."),
+            new TimingSpec(KEY_COMPLETE_SILENCE_MS,
+                    "Complete-silence timeout (ms)", DEFAULT_COMPLETE_SILENCE_MS, MAX_COMPLETE_SILENCE_MS,
+                    "Speech-recognizer silence timing. Some Android speech engines may ignore this value."),
+            new TimingSpec(KEY_POSSIBLY_COMPLETE_SILENCE_MS,
+                    "Possibly-complete silence timeout (ms)", DEFAULT_POSSIBLY_COMPLETE_SILENCE_MS, MAX_POSSIBLY_COMPLETE_SILENCE_MS,
+                    "Speech-recognizer early silence timing. Some Android speech engines may ignore this value."),
+            new TimingSpec(KEY_MIN_SPEECH_MS,
+                    "Minimum speech length (ms)", DEFAULT_MIN_SPEECH_MS, MAX_MIN_SPEECH_MS,
+                    "Minimum speech timing sent to the Android recognizer. Some engines may ignore it.")
+    };
 
     private TextView status;
     private TextView diagnostics;
     private TextView shizukuStatus;
     private TextView selectedKey;
     private EditText phraseInput;
-    private EditText delayInput;
-    private EditText rearmInput;
+    private final Map<String, EditText> timingInputs = new LinkedHashMap<>();
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable diagnosticUpdater = new Runnable() {
@@ -74,22 +153,42 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(40, 32, 40, 64);
         root.setGravity(Gravity.TOP);
+
+        final int sidePadding = dp(20);
+        final int normalTopPadding = dp(16);
+        final int normalBottomPadding = dp(40);
+        root.setPadding(sidePadding, normalTopPadding, sidePadding, normalBottomPadding);
+
+        // Android 15 / targetSdk 35 can draw apps edge-to-edge under the status
+        // and navigation bars. Add the real system-bar insets so both the first
+        // and final settings remain fully scrollable and visible on Samsung phones.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+            v.setPadding(
+                    sidePadding,
+                    normalTopPadding + bars.top,
+                    sidePadding,
+                    normalBottomPadding + bars.bottom
+            );
+            return insets;
+        });
+
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist v0.8");
+        title.setText("Hey ChatGPT Assist v1.0");
         title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\nAlways-listening mode. The old 45-second post-trigger pause is removed. After opening ChatGPT, the listener automatically re-arms and keeps retrying if Android temporarily reports the microphone/recognizer as busy.");
+        desc.setText("\nAlways-listening hands-free assistant. v1.0 exposes all listener timing values so you can tune the S22 yourself, and fixes content being hidden behind the top/bottom system bars.");
         desc.setTextSize(15);
         root.addView(desc);
 
@@ -120,69 +219,40 @@ public class MainActivity extends Activity {
 
         Button savePhrase = new Button(this);
         savePhrase.setText("Save activation phrase");
-        savePhrase.setOnClickListener(v -> saveWakePhrase());
+        savePhrase.setOnClickListener(v -> saveWakePhrase(true));
         root.addView(savePhrase);
 
-        TextView delayLabel = new TextView(this);
-        delayLabel.setText("\nAssistant trigger delay (milliseconds):");
-        delayLabel.setTextSize(16);
-        delayLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(delayLabel);
+        TextView timingTitle = new TextView(this);
+        timingTitle.setText("\nTiming settings");
+        timingTitle.setTextSize(20);
+        timingTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(timingTitle);
 
-        delayInput = new EditText(this);
-        delayInput.setSingleLine(true);
-        delayInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        delayInput.setHint("0 to 1000");
-        delayInput.setText(String.valueOf(getTriggerDelayMs()));
-        root.addView(delayInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView timingIntro = new TextView(this);
+        timingIntro.setText("Every listener delay/timing value is editable below. Values are milliseconds. 0 is allowed, but extremely low speech-engine timings can make recognition less stable.");
+        timingIntro.setTextSize(13);
+        root.addView(timingIntro);
 
-        TextView delayHelp = new TextView(this);
-        delayHelp.setText("0 = fastest. Default = 100 ms. Allowed range: 0–1000 ms.");
-        delayHelp.setTextSize(13);
-        root.addView(delayHelp);
+        for (TimingSpec spec : TIMING_SPECS) {
+            addTimingField(root, spec);
+        }
 
-        Button saveDelay = new Button(this);
-        saveDelay.setText("Save trigger delay");
-        saveDelay.setOnClickListener(v -> saveTriggerDelay());
-        root.addView(saveDelay);
-
-        TextView rearmLabel = new TextView(this);
-        rearmLabel.setText("\nRe-arm delay after opening assistant (milliseconds):");
-        rearmLabel.setTextSize(16);
-        rearmLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(rearmLabel);
-
-        rearmInput = new EditText(this);
-        rearmInput.setSingleLine(true);
-        rearmInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        rearmInput.setHint("0 to 5000");
-        rearmInput.setText(String.valueOf(getRearmDelayMs()));
-        root.addView(rearmInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView rearmHelp = new TextView(this);
-        rearmHelp.setText("How quickly the wake listener starts trying again after a trigger. Default = 500 ms. 0 = immediate. If ChatGPT has trouble hearing you, raise this a little.");
-        rearmHelp.setTextSize(13);
-        root.addView(rearmHelp);
-
-        Button saveRearm = new Button(this);
-        saveRearm.setText("Save re-arm delay");
-        saveRearm.setOnClickListener(v -> saveRearmDelay());
-        root.addView(saveRearm);
+        Button saveTiming = new Button(this);
+        saveTiming.setText("SAVE ALL TIMING SETTINGS");
+        saveTiming.setOnClickListener(v -> saveAllTimingSettings(true));
+        root.addView(saveTiming);
 
         Button start = new Button(this);
         start.setText("START ALWAYS LISTENING");
         start.setOnClickListener(v -> {
-            saveWakePhrase();
-            saveTriggerDelay();
-            saveRearmDelay();
+            saveWakePhrase(false);
+            saveAllTimingSettings(false);
             requestAndStart();
         });
         root.addView(start);
 
         Button stop = new Button(this);
-        stop.setText("Stop voice listening");
+        stop.setText("STOP VOICE LISTENING");
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, WakeListenerService.class));
             status.setText("Status: stopped");
@@ -207,7 +277,7 @@ public class MainActivity extends Activity {
         root.addView(shizukuStatus);
 
         Button grantShizuku = new Button(this);
-        grantShizuku.setText("Grant / check Shizuku permission");
+        grantShizuku.setText("GRANT / CHECK SHIZUKU PERMISSION");
         grantShizuku.setOnClickListener(v -> requestShizukuPermission());
         root.addView(grantShizuku);
 
@@ -217,7 +287,7 @@ public class MainActivity extends Activity {
         root.addView(test219);
 
         Button use219 = new Button(this);
-        use219.setText("Use key 219");
+        use219.setText("USE KEY 219");
         use219.setOnClickListener(v -> setSelectedKey(219));
         root.addView(use219);
 
@@ -227,23 +297,55 @@ public class MainActivity extends Activity {
         root.addView(test231);
 
         Button use231 = new Button(this);
-        use231.setText("Use key 231");
+        use231.setText("USE KEY 231");
         use231.setOnClickListener(v -> setSelectedKey(231));
         root.addView(use231);
 
         Button openShizuku = new Button(this);
-        openShizuku.setText("Open Shizuku");
+        openShizuku.setText("OPEN SHIZUKU");
         openShizuku.setOnClickListener(v -> openShizuku());
         root.addView(openShizuku);
 
         TextView note = new TextView(this);
-        note.setText("\nAlways-listening mode keeps the foreground listener service alive and automatically restarts speech recognition after normal timeouts, no-match results, and temporary busy errors. Android can still temporarily reserve the microphone for another app; when that happens this app keeps retrying automatically instead of waiting 45 seconds.\n\nYour trigger and re-arm delay settings are saved permanently.");
+        note.setText("\nThe app continuously restarts speech recognition after normal timeouts and temporary microphone errors. Android can still briefly reserve the microphone while ChatGPT is closing, so the busy-retry timing is now directly adjustable above.\n\nAll timing values, wake phrase, and selected Assist key are saved permanently.");
         note.setTextSize(13);
         root.addView(note);
 
+        // Extra scroll room in addition to the real navigation-bar inset. This
+        // prevents the last line from touching Samsung's gesture/navigation area.
+        Space bottomSpacer = new Space(this);
+        root.addView(bottomSpacer, new LinearLayout.LayoutParams(1, dp(72)));
+
         setContentView(scroll);
+        root.requestApplyInsets();
         updateDiagnostics();
         updateShizukuStatus();
+    }
+
+    private void addTimingField(LinearLayout root, TimingSpec spec) {
+        TextView label = new TextView(this);
+        label.setText("\n" + spec.label + ":");
+        label.setTextSize(16);
+        label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(label);
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setHint("0 to " + spec.maxValue);
+        input.setText(String.valueOf(getTimingValue(spec)));
+        timingInputs.put(spec.key, input);
+        root.addView(input, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView help = new TextView(this);
+        help.setText(spec.help + " Default = " + spec.defaultValue + " ms. Range 0–" + spec.maxValue + " ms.");
+        help.setTextSize(13);
+        root.addView(help);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     @Override protected void onResume() {
@@ -345,53 +447,57 @@ public class MainActivity extends Activity {
                 .getString(KEY_WAKE_PHRASE, DEFAULT_WAKE_PHRASE);
     }
 
-    private void saveWakePhrase() {
+    private void saveWakePhrase(boolean showToast) {
         String phrase = phraseInput.getText().toString().trim();
         if (phrase.isEmpty()) phrase = DEFAULT_WAKE_PHRASE;
         phraseInput.setText(phrase);
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit().putString(KEY_WAKE_PHRASE, phrase).apply();
-        Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
+        if (showToast) {
+            Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
+        }
     }
 
-    private int getTriggerDelayMs() {
+    private TimingSpec findTimingSpec(String key) {
+        for (TimingSpec spec : TIMING_SPECS) {
+            if (spec.key.equals(key)) return spec;
+        }
+        return null;
+    }
+
+    private int getTimingValue(TimingSpec spec) {
         int value = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getInt(KEY_TRIGGER_DELAY_MS, DEFAULT_TRIGGER_DELAY_MS);
-        return Math.max(0, Math.min(MAX_TRIGGER_DELAY_MS, value));
+                .getInt(spec.key, spec.defaultValue);
+        return Math.max(0, Math.min(spec.maxValue, value));
     }
 
-    private void saveTriggerDelay() {
-        int value = DEFAULT_TRIGGER_DELAY_MS;
-        try {
-            String raw = delayInput.getText().toString().trim();
-            if (!raw.isEmpty()) value = Integer.parseInt(raw);
-        } catch (NumberFormatException ignored) {}
-
-        value = Math.max(0, Math.min(MAX_TRIGGER_DELAY_MS, value));
-        delayInput.setText(String.valueOf(value));
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit().putInt(KEY_TRIGGER_DELAY_MS, value).apply();
-        Toast.makeText(this, "Trigger delay saved: " + value + " ms", Toast.LENGTH_SHORT).show();
+    private int getTimingValue(String key) {
+        TimingSpec spec = findTimingSpec(key);
+        return spec == null ? 0 : getTimingValue(spec);
     }
 
-    private int getRearmDelayMs() {
-        int value = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getInt(KEY_REARM_DELAY_MS, DEFAULT_REARM_DELAY_MS);
-        return Math.max(0, Math.min(MAX_REARM_DELAY_MS, value));
-    }
+    private void saveAllTimingSettings(boolean showToast) {
+        SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
 
-    private void saveRearmDelay() {
-        int value = DEFAULT_REARM_DELAY_MS;
-        try {
-            String raw = rearmInput.getText().toString().trim();
-            if (!raw.isEmpty()) value = Integer.parseInt(raw);
-        } catch (NumberFormatException ignored) {}
+        for (TimingSpec spec : TIMING_SPECS) {
+            EditText input = timingInputs.get(spec.key);
+            int value = spec.defaultValue;
+            if (input != null) {
+                try {
+                    String raw = input.getText().toString().trim();
+                    if (!raw.isEmpty()) value = Integer.parseInt(raw);
+                } catch (NumberFormatException ignored) {}
+            }
 
-        value = Math.max(0, Math.min(MAX_REARM_DELAY_MS, value));
-        rearmInput.setText(String.valueOf(value));
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit().putInt(KEY_REARM_DELAY_MS, value).apply();
-        Toast.makeText(this, "Re-arm delay saved: " + value + " ms", Toast.LENGTH_SHORT).show();
+            value = Math.max(0, Math.min(spec.maxValue, value));
+            if (input != null) input.setText(String.valueOf(value));
+            editor.putInt(spec.key, value);
+        }
+
+        editor.apply();
+        if (showToast) {
+            Toast.makeText(this, "All timing settings saved", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void requestAndStart() {
@@ -407,7 +513,12 @@ public class MainActivity extends Activity {
 
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("Status: always listening for ‘" + getWakePhrase() + "’ — trigger " + getTriggerDelayMs() + " ms, re-arm " + getRearmDelayMs() + " ms");
+        status.setText(
+                "Status: always listening for ‘" + getWakePhrase() + "’ — trigger " +
+                        getTimingValue(KEY_TRIGGER_DELAY_MS) + " ms, re-arm " +
+                        getTimingValue(KEY_REARM_DELAY_MS) + " ms, busy retry " +
+                        getTimingValue(KEY_BUSY_RETRY_DELAY_MS) + " ms"
+        );
     }
 
     @Override
