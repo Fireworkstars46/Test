@@ -56,7 +56,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer.destroy();
             recognizer = null;
         }
-
         try {
             if (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
                 recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
@@ -66,9 +65,7 @@ public class WakeListenerService extends Service implements RecognitionListener 
         } catch (Throwable t) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this);
         }
-
         recognizer.setRecognitionListener(this);
-
         recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -93,15 +90,11 @@ public class WakeListenerService extends Service implements RecognitionListener 
 
     private boolean hasWakePhrase(ArrayList<String> results) {
         if (results == null) return false;
-
         String target = normalize(getWakePhrase());
         if (target.isEmpty()) return false;
-
         for (String s : results) {
             String heard = normalize(s);
-            if (heard.equals(target) || heard.contains(target)) {
-                return true;
-            }
+            if (heard.equals(target) || heard.contains(target)) return true;
         }
         return false;
     }
@@ -109,18 +102,16 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private void triggerAssistant() {
         if (pausedForAssistant) return;
         pausedForAssistant = true;
-        updateNotification("Activation phrase heard — opening assistant");
+        updateNotification("Activation phrase heard — opening ChatGPT");
 
         try { recognizer.cancel(); } catch (Throwable ignored) {}
         try { recognizer.destroy(); } catch (Throwable ignored) {}
         recognizer = null;
 
         handler.postDelayed(() -> {
-            boolean ok = AssistantAccessibilityService.showAssistant();
-            if (!ok) {
-                updateNotification("Enable Accessibility service, then test again");
-            }
-        }, 450);
+            boolean ok = AssistantAccessibilityService.showAssistant(this);
+            if (!ok) updateNotification("Could not launch ChatGPT assistant");
+        }, 600);
 
         handler.postDelayed(() -> {
             if (stopping) return;
@@ -134,24 +125,17 @@ public class WakeListenerService extends Service implements RecognitionListener 
         ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (hasWakePhrase(list)) triggerAssistant();
     }
-
     @Override public void onResults(Bundle results) {
         ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (hasWakePhrase(list)) {
-            triggerAssistant();
-        } else if (!pausedForAssistant) {
-            startListeningSoon(RESTART_DELAY_MS);
-        }
+        if (hasWakePhrase(list)) triggerAssistant();
+        else if (!pausedForAssistant) startListeningSoon(RESTART_DELAY_MS);
     }
-
     @Override public void onError(int error) {
         if (!stopping && !pausedForAssistant) {
             if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
                 setupRecognizer();
                 startListeningSoon(1200);
-            } else {
-                startListeningSoon(RESTART_DELAY_MS);
-            }
+            } else startListeningSoon(RESTART_DELAY_MS);
         }
     }
 
@@ -174,7 +158,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(
                 this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
         return new Notification.Builder(this, CHANNEL)
                 .setContentTitle("Hey ChatGPT Assist")
                 .setContentText(text)
@@ -185,8 +168,7 @@ public class WakeListenerService extends Service implements RecognitionListener 
     }
 
     private void updateNotification(String text) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.notify(NOTIFICATION_ID, notification(text));
+        getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(text));
     }
 
     @Override
@@ -200,8 +182,5 @@ public class WakeListenerService extends Service implements RecognitionListener 
         super.onDestroy();
     }
 
-    @Override
-    public android.os.IBinder onBind(Intent intent) {
-        return null;
-    }
+    @Override public android.os.IBinder onBind(Intent intent) { return null; }
 }
