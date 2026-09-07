@@ -40,6 +40,19 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HeyChatGPTAssist-v1.0-apk
+          name: HeyChatGPTAssist-v1.1-apk
           path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Stage APK signing tools
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" signing-tools/
+          cp -r "$ANDROID_SDK_ROOT/build-tools/35.0.0/lib" signing-tools/
+
+      - name: Upload APK signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apksigner-35
+          path: HeyChatGPTAssist/signing-tools
           if-no-files-found: error
