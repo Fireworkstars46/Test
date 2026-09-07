@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hey ChatGPT Assist</string>
-    <string name="accessibility_description">Allows Hey ChatGPT Assist to invoke Android's Show Assistant action. It does not read screen content.</string>
+    <string name="accessibility_description">Allows Hey ChatGPT Assist to invoke the Android Show Assistant action. It does not read screen content.</string>
 </resources>
