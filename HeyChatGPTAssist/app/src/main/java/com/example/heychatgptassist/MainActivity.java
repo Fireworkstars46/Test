@@ -2,6 +2,7 @@ package com.example.heychatgptassist;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -10,11 +11,14 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -36,6 +40,8 @@ public class MainActivity extends Activity {
     public static final String DEFAULT_WAKE_PHRASE = "Hey ChatGPT";
     public static final String KEY_ASSIST_KEYCODE = "assist_keycode";
     public static final int DEFAULT_ASSIST_KEYCODE = 231;
+
+    public static final String KEY_RESPONSE_TEXT_ENABLED = "response_text_enabled";
 
     public static final String KEY_TRIGGER_DELAY_MS = "trigger_delay_ms";
     public static final int DEFAULT_TRIGGER_DELAY_MS = 100;
@@ -123,7 +129,9 @@ public class MainActivity extends Activity {
     private TextView diagnostics;
     private TextView shizukuStatus;
     private TextView selectedKey;
+    private TextView responseTextStatus;
     private EditText phraseInput;
+    private CheckBox responseTextToggle;
     private final Map<String, EditText> timingInputs = new LinkedHashMap<>();
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -131,6 +139,7 @@ public class MainActivity extends Activity {
         @Override public void run() {
             updateDiagnostics();
             updateShizukuStatus();
+            updateResponseTextStatus();
             uiHandler.postDelayed(this, 1500);
         }
     };
@@ -163,18 +172,10 @@ public class MainActivity extends Activity {
         final int normalTopPadding = dp(16);
         final int normalBottomPadding = dp(40);
         root.setPadding(sidePadding, normalTopPadding, sidePadding, normalBottomPadding);
-
-        // Android 15 / targetSdk 35 can draw apps edge-to-edge under the status
-        // and navigation bars. Add the real system-bar insets so both the first
-        // and final settings remain fully scrollable and visible on Samsung phones.
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(
-                    sidePadding,
-                    normalTopPadding + bars.top,
-                    sidePadding,
-                    normalBottomPadding + bars.bottom
-            );
+            v.setPadding(sidePadding, normalTopPadding + bars.top,
+                    sidePadding, normalBottomPadding + bars.bottom);
             return insets;
         });
 
@@ -182,13 +183,13 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist v1.0");
+        title.setText("Hey ChatGPT Assist v1.1");
         title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\nAlways-listening hands-free assistant. v1.0 exposes all listener timing values so you can tune the S22 yourself, and fixes content being hidden behind the top/bottom system bars.");
+        desc.setText("\nAlways-listening assistant plus optional Siri-style response text over the real ChatGPT assistant popup.");
         desc.setTextSize(15);
         root.addView(desc);
 
@@ -218,9 +219,45 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button savePhrase = new Button(this);
-        savePhrase.setText("Save activation phrase");
+        savePhrase.setText("SAVE ACTIVATION PHRASE");
         savePhrase.setOnClickListener(v -> saveWakePhrase(true));
         root.addView(savePhrase);
+
+        TextView responseTitle = new TextView(this);
+        responseTitle.setText("\nSiri-style response text");
+        responseTitle.setTextSize(20);
+        responseTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(responseTitle);
+
+        TextView responseHelp = new TextView(this);
+        responseHelp.setText("This keeps the real ChatGPT assistant popup. When ChatGPT exposes its live text through Android Accessibility, this app mirrors that text into a small panel above the popup. The Accessibility service is restricted to the ChatGPT package.");
+        responseHelp.setTextSize(13);
+        root.addView(responseHelp);
+
+        responseTextToggle = new CheckBox(this);
+        responseTextToggle.setText("Show ChatGPT response text popup");
+        responseTextToggle.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_RESPONSE_TEXT_ENABLED, true));
+        responseTextToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(KEY_RESPONSE_TEXT_ENABLED, isChecked).apply();
+            updateResponseTextStatus();
+        });
+        root.addView(responseTextToggle);
+
+        responseTextStatus = new TextView(this);
+        responseTextStatus.setTextSize(14);
+        root.addView(responseTextStatus);
+
+        Button accessibility = new Button(this);
+        accessibility.setText("OPEN ACCESSIBILITY SETTINGS");
+        accessibility.setOnClickListener(v -> openAccessibilitySettings());
+        root.addView(accessibility);
+
+        TextView accessibilityNote = new TextView(this);
+        accessibilityNote.setText("One-time setup: in Accessibility, turn on ‘Hey ChatGPT Assist response text’. Android will show an Accessibility warning because this feature needs permission to read ChatGPT's on-screen response text.");
+        accessibilityNote.setTextSize(13);
+        root.addView(accessibilityNote);
 
         TextView timingTitle = new TextView(this);
         timingTitle.setText("\nTiming settings");
@@ -229,13 +266,11 @@ public class MainActivity extends Activity {
         root.addView(timingTitle);
 
         TextView timingIntro = new TextView(this);
-        timingIntro.setText("Every listener delay/timing value is editable below. Values are milliseconds. 0 is allowed, but extremely low speech-engine timings can make recognition less stable.");
+        timingIntro.setText("Every listener delay/timing value is editable below. Values are milliseconds.");
         timingIntro.setTextSize(13);
         root.addView(timingIntro);
 
-        for (TimingSpec spec : TIMING_SPECS) {
-            addTimingField(root, spec);
-        }
+        for (TimingSpec spec : TIMING_SPECS) addTimingField(root, spec);
 
         Button saveTiming = new Button(this);
         saveTiming.setText("SAVE ALL TIMING SETTINGS");
@@ -307,19 +342,18 @@ public class MainActivity extends Activity {
         root.addView(openShizuku);
 
         TextView note = new TextView(this);
-        note.setText("\nThe app continuously restarts speech recognition after normal timeouts and temporary microphone errors. Android can still briefly reserve the microphone while ChatGPT is closing, so the busy-retry timing is now directly adjustable above.\n\nAll timing values, wake phrase, and selected Assist key are saved permanently.");
+        note.setText("\nResponse text depends on what the installed ChatGPT assistant exposes to Android Accessibility. The normal wake/assistant behavior works independently, so turning this feature off does not affect your existing setup.");
         note.setTextSize(13);
         root.addView(note);
 
-        // Extra scroll room in addition to the real navigation-bar inset. This
-        // prevents the last line from touching Samsung's gesture/navigation area.
         Space bottomSpacer = new Space(this);
-        root.addView(bottomSpacer, new LinearLayout.LayoutParams(1, dp(72)));
+        root.addView(bottomSpacer, new LinearLayout.LayoutParams(1, dp(96)));
 
         setContentView(scroll);
         root.requestApplyInsets();
         updateDiagnostics();
         updateShizukuStatus();
+        updateResponseTextStatus();
     }
 
     private void addTimingField(LinearLayout root, TimingSpec spec) {
@@ -363,6 +397,45 @@ public class MainActivity extends Activity {
         uiHandler.removeCallbacks(diagnosticUpdater);
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener);
         super.onDestroy();
+    }
+
+    private void openAccessibilitySettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        } catch (Throwable t) {
+            Toast.makeText(this, "Could not open Accessibility settings", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean isResponseAccessibilityEnabled() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (enabled == null) return false;
+
+        ComponentName wanted = new ComponentName(this, ChatGPTTextAccessibilityService.class);
+        TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
+        splitter.setString(enabled);
+        while (splitter.hasNext()) {
+            ComponentName found = ComponentName.unflattenFromString(splitter.next());
+            if (wanted.equals(found)) return true;
+        }
+        return false;
+    }
+
+    private void updateResponseTextStatus() {
+        if (responseTextStatus == null) return;
+        boolean feature = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_RESPONSE_TEXT_ENABLED, true);
+        boolean service = isResponseAccessibilityEnabled();
+        String last = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString(ChatGPTTextAccessibilityService.KEY_LAST_CAPTURED_TEXT, "");
+        String text = "Response text: " + (feature ? "ON" : "OFF") +
+                " | Accessibility: " + (service ? "enabled" : "needs setup");
+        if (!last.isEmpty()) {
+            String preview = last.length() > 120 ? last.substring(0, 120) + "…" : last;
+            text += "\nLast captured: " + preview;
+        }
+        responseTextStatus.setText(text);
     }
 
     private void requestShizukuPermission() {
@@ -425,7 +498,6 @@ public class MainActivity extends Activity {
             requestShizukuPermission();
             return;
         }
-
         status.setText("Status: sending Android key " + keyCode + "…");
         new Thread(() -> {
             ShizukuBridge.Result result = ShizukuBridge.sendKeyEvent(keyCode);
@@ -453,21 +525,16 @@ public class MainActivity extends Activity {
         phraseInput.setText(phrase);
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit().putString(KEY_WAKE_PHRASE, phrase).apply();
-        if (showToast) {
-            Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
-        }
+        if (showToast) Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
     }
 
     private TimingSpec findTimingSpec(String key) {
-        for (TimingSpec spec : TIMING_SPECS) {
-            if (spec.key.equals(key)) return spec;
-        }
+        for (TimingSpec spec : TIMING_SPECS) if (spec.key.equals(key)) return spec;
         return null;
     }
 
     private int getTimingValue(TimingSpec spec) {
-        int value = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getInt(spec.key, spec.defaultValue);
+        int value = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(spec.key, spec.defaultValue);
         return Math.max(0, Math.min(spec.maxValue, value));
     }
 
@@ -478,7 +545,6 @@ public class MainActivity extends Activity {
 
     private void saveAllTimingSettings(boolean showToast) {
         SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-
         for (TimingSpec spec : TIMING_SPECS) {
             EditText input = timingInputs.get(spec.key);
             int value = spec.defaultValue;
@@ -488,16 +554,12 @@ public class MainActivity extends Activity {
                     if (!raw.isEmpty()) value = Integer.parseInt(raw);
                 } catch (NumberFormatException ignored) {}
             }
-
             value = Math.max(0, Math.min(spec.maxValue, value));
             if (input != null) input.setText(String.valueOf(value));
             editor.putInt(spec.key, value);
         }
-
         editor.apply();
-        if (showToast) {
-            Toast.makeText(this, "All timing settings saved", Toast.LENGTH_SHORT).show();
-        }
+        if (showToast) Toast.makeText(this, "All timing settings saved", Toast.LENGTH_SHORT).show();
     }
 
     private void requestAndStart() {
@@ -510,23 +572,18 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
             return;
         }
-
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText(
-                "Status: always listening for ‘" + getWakePhrase() + "’ — trigger " +
-                        getTimingValue(KEY_TRIGGER_DELAY_MS) + " ms, re-arm " +
-                        getTimingValue(KEY_REARM_DELAY_MS) + " ms, busy retry " +
-                        getTimingValue(KEY_BUSY_RETRY_DELAY_MS) + " ms"
-        );
+        status.setText("Status: always listening for ‘" + getWakePhrase() + "’ — trigger " +
+                getTimingValue(KEY_TRIGGER_DELAY_MS) + " ms, re-arm " +
+                getTimingValue(KEY_REARM_DELAY_MS) + " ms, busy retry " +
+                getTimingValue(KEY_BUSY_RETRY_DELAY_MS) + " ms");
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_MIC && grantResults.length > 0 &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            requestAndStart();
-        }
+                grantResults[0] == PackageManager.PERMISSION_GRANTED) requestAndStart();
     }
 }
