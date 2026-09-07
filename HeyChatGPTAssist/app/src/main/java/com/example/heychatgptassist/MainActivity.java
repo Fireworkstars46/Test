@@ -5,18 +5,16 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -43,7 +41,7 @@ public class MainActivity extends Activity {
         @Override public void run() {
             updateDiagnostics();
             updateShizukuStatus();
-            uiHandler.postDelayed(this, 700);
+            uiHandler.postDelayed(this, 1500);
         }
     };
 
@@ -51,9 +49,9 @@ public class MainActivity extends Activity {
             (requestCode, grantResult) -> {
                 if (requestCode != REQ_SHIZUKU) return;
                 if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                    status.setText("\nShizuku permission granted.\n");
+                    status.setText("Status: Shizuku permission granted");
                 } else {
-                    status.setText("\nShizuku permission denied.\n");
+                    status.setText("Status: Shizuku permission denied");
                 }
                 updateShizukuStatus();
             };
@@ -63,67 +61,35 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
 
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(48, 42, 48, 48);
+        root.setPadding(40, 32, 40, 64);
         root.setGravity(Gravity.TOP);
-
-        TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist v0.5");
-        title.setTextSize(26);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(title, new LinearLayout.LayoutParams(
+        scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        TextView title = new TextView(this);
+        title.setText("Hey ChatGPT Assist v0.6");
+        title.setTextSize(25);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(title);
+
         TextView desc = new TextView(this);
-        desc.setText("\nv0.5 uses Shizuku to send Android's real Assist / Voice Assist key instead of opening the ChatGPT app directly. First find which test key exactly matches your S22 Side-button assistant.");
-        desc.setTextSize(16);
+        desc.setText("\nSmoother hands-free mode: faster trigger, quieter notification, fewer listener restarts, and a fully scrollable settings screen.");
+        desc.setTextSize(15);
         root.addView(desc);
 
-        shizukuStatus = new TextView(this);
-        shizukuStatus.setText("\nShizuku: checking…");
-        shizukuStatus.setTextSize(16);
-        shizukuStatus.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(shizukuStatus);
-
-        Button grantShizuku = new Button(this);
-        grantShizuku.setText("Grant / check Shizuku permission");
-        grantShizuku.setOnClickListener(v -> requestShizukuPermission());
-        root.addView(grantShizuku);
-
-        Button openShizuku = new Button(this);
-        openShizuku.setText("Open Shizuku");
-        openShizuku.setOnClickListener(v -> openShizuku());
-        root.addView(openShizuku);
-
-        selectedKey = new TextView(this);
-        selectedKey.setTextSize(16);
-        selectedKey.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(selectedKey);
-        updateSelectedKeyText();
-
-        Button test219 = new Button(this);
-        test219.setText("TEST ASSIST KEY 219");
-        test219.setOnClickListener(v -> testKey(219));
-        root.addView(test219);
-
-        Button use219 = new Button(this);
-        use219.setText("Use key 219 for wake phrase");
-        use219.setOnClickListener(v -> setSelectedKey(219));
-        root.addView(use219);
-
-        Button test231 = new Button(this);
-        test231.setText("TEST VOICE ASSIST KEY 231");
-        test231.setOnClickListener(v -> testKey(231));
-        root.addView(test231);
-
-        Button use231 = new Button(this);
-        use231.setText("Use key 231 for wake phrase");
-        use231.setOnClickListener(v -> setSelectedKey(231));
-        root.addView(use231);
+        status = new TextView(this);
+        status.setText("\nStatus: stopped");
+        status.setTextSize(17);
+        status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(status);
 
         TextView label = new TextView(this);
-        label.setText("\nCustom activation phrase:");
+        label.setText("\nActivation phrase:");
         label.setTextSize(16);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(label);
@@ -140,18 +106,8 @@ public class MainActivity extends Activity {
         savePhrase.setOnClickListener(v -> saveWakePhrase());
         root.addView(savePhrase);
 
-        status = new TextView(this);
-        status.setText("\nStatus: stopped\n");
-        status.setTextSize(17);
-        root.addView(status);
-
-        diagnostics = new TextView(this);
-        diagnostics.setText("Listener details: not started");
-        diagnostics.setTextSize(15);
-        root.addView(diagnostics);
-
         Button start = new Button(this);
-        start.setText("Start voice listening");
+        start.setText("START VOICE LISTENING");
         start.setOnClickListener(v -> {
             saveWakePhrase();
             requestAndStart();
@@ -162,17 +118,63 @@ public class MainActivity extends Activity {
         stop.setText("Stop voice listening");
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, WakeListenerService.class));
-            status.setText("\nStatus: stopped\n");
+            status.setText("Status: stopped");
             updateDiagnostics();
         });
         root.addView(stop);
 
+        diagnostics = new TextView(this);
+        diagnostics.setText("\nListener details: not started");
+        diagnostics.setTextSize(14);
+        root.addView(diagnostics);
+
+        selectedKey = new TextView(this);
+        selectedKey.setTextSize(15);
+        selectedKey.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(selectedKey);
+        updateSelectedKeyText();
+
+        shizukuStatus = new TextView(this);
+        shizukuStatus.setText("\nShizuku: checking…");
+        shizukuStatus.setTextSize(15);
+        root.addView(shizukuStatus);
+
+        Button grantShizuku = new Button(this);
+        grantShizuku.setText("Grant / check Shizuku permission");
+        grantShizuku.setOnClickListener(v -> requestShizukuPermission());
+        root.addView(grantShizuku);
+
+        Button test219 = new Button(this);
+        test219.setText("TEST ASSIST KEY 219");
+        test219.setOnClickListener(v -> testKey(219));
+        root.addView(test219);
+
+        Button use219 = new Button(this);
+        use219.setText("Use key 219");
+        use219.setOnClickListener(v -> setSelectedKey(219));
+        root.addView(use219);
+
+        Button test231 = new Button(this);
+        test231.setText("TEST VOICE ASSIST KEY 231");
+        test231.setOnClickListener(v -> testKey(231));
+        root.addView(test231);
+
+        Button use231 = new Button(this);
+        use231.setText("Use key 231");
+        use231.setOnClickListener(v -> setSelectedKey(231));
+        root.addView(use231);
+
+        Button openShizuku = new Button(this);
+        openShizuku.setText("Open Shizuku");
+        openShizuku.setOnClickListener(v -> openShizuku());
+        root.addView(openShizuku);
+
         TextView note = new TextView(this);
-        note.setText("\nTEST ORDER: 1) Start Shizuku and grant this app permission. 2) Tap TEST ASSIST KEY 219. 3) Return here and tap TEST VOICE ASSIST KEY 231. 4) Whichever one looks exactly like holding your Side button, tap the matching ‘Use key’ button. 5) Then test the wake phrase.");
-        note.setTextSize(14);
+        note.setText("\nThe listener notification is now silent, low-priority, and kept static so it should stop jumping around in the notification list. Android/Samsung still controls final notification ordering.\n\nYou can scroll all the way to the bottom now.");
+        note.setTextSize(13);
         root.addView(note);
 
-        setContentView(root);
+        setContentView(scroll);
         updateDiagnostics();
         updateShizukuStatus();
     }
@@ -189,6 +191,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        uiHandler.removeCallbacks(diagnosticUpdater);
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener);
         super.onDestroy();
     }
@@ -196,37 +199,32 @@ public class MainActivity extends Activity {
     private void requestShizukuPermission() {
         try {
             if (!ShizukuBridge.isRunning()) {
-                status.setText("\nShizuku is not running. Open Shizuku and start it first.\n");
+                status.setText("Status: Shizuku is not running");
                 return;
             }
             if (ShizukuBridge.hasPermission()) {
-                status.setText("\nShizuku permission is already granted.\n");
+                status.setText("Status: Shizuku permission already granted");
                 return;
             }
             Shizuku.requestPermission(REQ_SHIZUKU);
-            status.setText("\nWaiting for Shizuku permission…\n");
+            status.setText("Status: waiting for Shizuku permission…");
         } catch (Throwable t) {
-            status.setText("\nCould not request Shizuku permission: " + t.getClass().getSimpleName() + "\n");
+            status.setText("Status: Shizuku permission error: " + t.getClass().getSimpleName());
         }
     }
 
     private void openShizuku() {
         try {
             Intent launch = getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
-            if (launch != null) {
-                startActivity(launch);
-            } else {
-                Toast.makeText(this, "Shizuku is not installed", Toast.LENGTH_LONG).show();
-            }
+            if (launch != null) startActivity(launch);
+            else Toast.makeText(this, "Shizuku is not installed", Toast.LENGTH_LONG).show();
         } catch (Throwable t) {
             Toast.makeText(this, "Could not open Shizuku", Toast.LENGTH_LONG).show();
         }
     }
 
     private void updateShizukuStatus() {
-        if (shizukuStatus != null) {
-            shizukuStatus.setText("\nShizuku: " + ShizukuBridge.statusText());
-        }
+        if (shizukuStatus != null) shizukuStatus.setText("\nShizuku: " + ShizukuBridge.statusText());
     }
 
     private int getSelectedKey() {
@@ -245,24 +243,24 @@ public class MainActivity extends Activity {
         if (selectedKey == null) return;
         int key = getSelectedKey();
         String name = key == 219 ? "Assist" : key == 231 ? "Voice Assist" : "Custom";
-        selectedKey.setText("\nWake phrase action: " + name + " key " + key);
+        selectedKey.setText("\nWake action: " + name + " key " + key);
     }
 
     private void testKey(int keyCode) {
         if (!ShizukuBridge.isRunning()) {
-            status.setText("\nShizuku is not running.\n");
+            status.setText("Status: Shizuku is not running");
             return;
         }
         if (!ShizukuBridge.hasPermission()) {
-            status.setText("\nGrant Shizuku permission first.\n");
+            status.setText("Status: grant Shizuku permission first");
             requestShizukuPermission();
             return;
         }
 
-        status.setText("\nSending Android key " + keyCode + "…\n");
+        status.setText("Status: sending Android key " + keyCode + "…");
         new Thread(() -> {
             ShizukuBridge.Result result = ShizukuBridge.sendKeyEvent(keyCode);
-            runOnUiThread(() -> status.setText("\n" + result.message + "\n"));
+            runOnUiThread(() -> status.setText("Status: " + result.message));
         }, "shizuku-key-test").start();
     }
 
@@ -270,14 +268,14 @@ public class MainActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String listener = prefs.getString(WakeListenerService.KEY_LISTENER_STATUS, "Not started");
         String heard = prefs.getString(WakeListenerService.KEY_LAST_HEARD, "");
-        String text = "Listener details: " + listener;
+        String text = "\nListener details: " + listener;
         if (!heard.isEmpty()) text += "\nLast heard: " + heard;
         if (diagnostics != null) diagnostics.setText(text);
     }
 
     private String getWakePhrase() {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        return prefs.getString(KEY_WAKE_PHRASE, DEFAULT_WAKE_PHRASE);
+        return getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString(KEY_WAKE_PHRASE, DEFAULT_WAKE_PHRASE);
     }
 
     private void saveWakePhrase() {
@@ -291,7 +289,7 @@ public class MainActivity extends Activity {
 
     private void requestAndStart() {
         if (!ShizukuBridge.hasPermission()) {
-            status.setText("\nShizuku must be running and authorized before hands-free mode can trigger the real assistant key.\n");
+            status.setText("Status: Shizuku must be running and authorized");
             requestShizukuPermission();
             return;
         }
@@ -299,19 +297,18 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
             return;
         }
-        if (Build.VERSION.SDK_INT >= 33 &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_MIC);
-            return;
-        }
+
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("\nStatus: starting listener for ‘" + getWakePhrase() + "’ using key " + getSelectedKey() + "\n");
+        status.setText("Status: listening for ‘" + getWakePhrase() + "’");
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_MIC) requestAndStart();
+        if (requestCode == REQ_MIC && grantResults.length > 0 &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            requestAndStart();
+        }
     }
 }
