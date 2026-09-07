@@ -1,38 +1,40 @@
 package com.example.heychatgptassist;
 
-import android.accessibilityservice.AccessibilityService;
-import android.view.accessibility.AccessibilityEvent;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 
-public class AssistantAccessibilityService extends AccessibilityService {
-    private static volatile AssistantAccessibilityService instance;
+public final class AssistantAccessibilityService {
+    private static final String CHATGPT_PACKAGE = "com.openai.chatgpt";
+    private static final String CHATGPT_ASSISTANT_ACTIVITY = "com.openai.voice.assistant.AssistantActivity";
 
-    @Override
-    protected void onServiceConnected() {
-        super.onServiceConnected();
-        instance = this;
-    }
+    private AssistantAccessibilityService() {}
 
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        // No screen content is read. This service is only used to invoke the system Assistant action.
-    }
-
-    @Override
-    public void onInterrupt() {
-    }
-
-    @Override
-    public void onDestroy() {
-        if (instance == this) instance = null;
-        super.onDestroy();
-    }
-
-    public static boolean isConnected() {
-        return instance != null;
-    }
-
-    public static boolean showAssistant() {
-        AssistantAccessibilityService service = instance;
-        return service != null && service.performGlobalAction(GLOBAL_ACTION_ASSIST);
+    public static boolean showAssistant(Context context) {
+        try {
+            Intent direct = new Intent();
+            direct.setComponent(new ComponentName(CHATGPT_PACKAGE, CHATGPT_ASSISTANT_ACTIVITY));
+            direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            context.startActivity(direct);
+            return true;
+        } catch (Throwable directError) {
+            try {
+                Intent fallback = new Intent(Intent.ACTION_VIEW, Uri.parse("https://chat.com/?mode=voice"));
+                fallback.setPackage(CHATGPT_PACKAGE);
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                context.startActivity(fallback);
+                return true;
+            } catch (Throwable packageFallbackError) {
+                try {
+                    Intent browserFallback = new Intent(Intent.ACTION_VIEW, Uri.parse("https://chat.com/?mode=voice"));
+                    browserFallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(browserFallback);
+                    return true;
+                } catch (Throwable ignored) {
+                    return false;
+                }
+            }
+        }
     }
 }
