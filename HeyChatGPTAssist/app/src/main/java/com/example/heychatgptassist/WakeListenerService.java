@@ -9,8 +9,6 @@ import java.util.*;
 public class WakeListenerService extends Service implements RecognitionListener {
     private static final String CHANNEL = "wake_listener_quiet_v06";
     private static final int NOTIFICATION_ID = 46;
-    private static final long RESTART_DELAY_MS = 100;
-    private static final long BUSY_RESTART_DELAY_MS = 500;
 
     public static final String KEY_LISTENER_STATUS = "listener_status";
     public static final String KEY_LAST_HEARD = "last_heard";
@@ -39,8 +37,14 @@ public class WakeListenerService extends Service implements RecognitionListener 
         handler.removeCallbacks(startRunnable);
         try { setupRecognizer(); } catch (Throwable ignored) {}
         setStatus("Always listening for ‘" + getWakePhrase() + "’");
-        startListeningSoon(100);
+        startListeningSoon(getInitialListenDelayMs());
         return START_STICKY;
+    }
+
+    private int getIntPref(String key, int defaultValue, int maxValue) {
+        int value = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                .getInt(key, defaultValue);
+        return Math.max(0, Math.min(maxValue, value));
     }
 
     private String getWakePhrase() {
@@ -55,15 +59,48 @@ public class WakeListenerService extends Service implements RecognitionListener 
     }
 
     private int getTriggerDelayMs() {
-        int value = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .getInt(MainActivity.KEY_TRIGGER_DELAY_MS, MainActivity.DEFAULT_TRIGGER_DELAY_MS);
-        return Math.max(0, Math.min(MainActivity.MAX_TRIGGER_DELAY_MS, value));
+        return getIntPref(MainActivity.KEY_TRIGGER_DELAY_MS,
+                MainActivity.DEFAULT_TRIGGER_DELAY_MS, MainActivity.MAX_TRIGGER_DELAY_MS);
     }
 
     private int getRearmDelayMs() {
-        int value = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .getInt(MainActivity.KEY_REARM_DELAY_MS, MainActivity.DEFAULT_REARM_DELAY_MS);
-        return Math.max(0, Math.min(MainActivity.MAX_REARM_DELAY_MS, value));
+        return getIntPref(MainActivity.KEY_REARM_DELAY_MS,
+                MainActivity.DEFAULT_REARM_DELAY_MS, MainActivity.MAX_REARM_DELAY_MS);
+    }
+
+    private int getInitialListenDelayMs() {
+        return getIntPref(MainActivity.KEY_INITIAL_LISTEN_DELAY_MS,
+                MainActivity.DEFAULT_INITIAL_LISTEN_DELAY_MS, MainActivity.MAX_INITIAL_LISTEN_DELAY_MS);
+    }
+
+    private int getRestartDelayMs() {
+        return getIntPref(MainActivity.KEY_RESTART_DELAY_MS,
+                MainActivity.DEFAULT_RESTART_DELAY_MS, MainActivity.MAX_RESTART_DELAY_MS);
+    }
+
+    private int getBusyRetryDelayMs() {
+        return getIntPref(MainActivity.KEY_BUSY_RETRY_DELAY_MS,
+                MainActivity.DEFAULT_BUSY_RETRY_DELAY_MS, MainActivity.MAX_BUSY_RETRY_DELAY_MS);
+    }
+
+    private int getRateLimitRetryDelayMs() {
+        return getIntPref(MainActivity.KEY_RATE_LIMIT_RETRY_DELAY_MS,
+                MainActivity.DEFAULT_RATE_LIMIT_RETRY_DELAY_MS, MainActivity.MAX_RATE_LIMIT_RETRY_DELAY_MS);
+    }
+
+    private int getCompleteSilenceMs() {
+        return getIntPref(MainActivity.KEY_COMPLETE_SILENCE_MS,
+                MainActivity.DEFAULT_COMPLETE_SILENCE_MS, MainActivity.MAX_COMPLETE_SILENCE_MS);
+    }
+
+    private int getPossiblyCompleteSilenceMs() {
+        return getIntPref(MainActivity.KEY_POSSIBLY_COMPLETE_SILENCE_MS,
+                MainActivity.DEFAULT_POSSIBLY_COMPLETE_SILENCE_MS, MainActivity.MAX_POSSIBLY_COMPLETE_SILENCE_MS);
+    }
+
+    private int getMinSpeechMs() {
+        return getIntPref(MainActivity.KEY_MIN_SPEECH_MS,
+                MainActivity.DEFAULT_MIN_SPEECH_MS, MainActivity.MAX_MIN_SPEECH_MS);
     }
 
     private String normalize(String s) {
@@ -91,9 +128,12 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                (long) getCompleteSilenceMs());
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+                (long) getPossiblyCompleteSilenceMs());
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+                (long) getMinSpeechMs());
     }
 
     private void startListeningSoon(long delayMs) {
@@ -110,9 +150,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer.startListening(recognizerIntent);
             setStatus("Always listening for ‘" + getWakePhrase() + "’");
         } catch (Throwable t) {
-            // Never give up: rebuild the recognizer and keep retrying.
-            try { setupRecognizer(); } catch (Throwable ignored) {}
-            startListeningSoon(BUSY_RESTART_DELAY_MS);
+            try { setupRecognizer(); } catch (Throwable ignored) { recognizer = null; }
+            startListeningSoon(getBusyRetryDelayMs());
         }
     }
 
@@ -173,8 +212,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             });
         }, "shizuku-wake-trigger").start();
 
-        // v0.7 waited 45 seconds here. v0.8 always re-arms after the user's
-        // short delay, then continuously retries if the recognizer/mic is busy.
         if (rearmDelayMs <= 0) handler.post(rearmRunnable);
         else handler.postDelayed(rearmRunnable, rearmDelayMs);
     }
@@ -214,7 +251,7 @@ public class WakeListenerService extends Service implements RecognitionListener 
         if (hasWakePhrase(list)) {
             triggerAssistant();
         } else if (!pausedForAssistant && !stopping) {
-            startListeningSoon(RESTART_DELAY_MS);
+            startListeningSoon(getRestartDelayMs());
         }
     }
 
@@ -226,18 +263,30 @@ public class WakeListenerService extends Service implements RecognitionListener 
             return;
         }
 
-        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
-                error == SpeechRecognizer.ERROR_CLIENT ||
+        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+            // A common short-lived condition while ChatGPT is releasing the mic.
+            // Avoid rebuilding everything; cancel and retry at the user's interval.
+            if (recognizer != null) {
+                try { recognizer.cancel(); } catch (Throwable ignored) {}
+            }
+            startListeningSoon(getBusyRetryDelayMs());
+            return;
+        }
+
+        if (error == SpeechRecognizer.ERROR_CLIENT ||
                 (Build.VERSION.SDK_INT >= 31 && error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED)) {
             try { setupRecognizer(); } catch (Throwable ignored) { recognizer = null; }
-            startListeningSoon(BUSY_RESTART_DELAY_MS);
-        } else if (Build.VERSION.SDK_INT >= 31 && error == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS) {
-            // Back off a little, then continue automatically.
-            startListeningSoon(1000);
-        } else {
-            // Speech timeout and no-match are normal for an always-on loop.
-            startListeningSoon(RESTART_DELAY_MS);
+            startListeningSoon(getBusyRetryDelayMs());
+            return;
         }
+
+        if (Build.VERSION.SDK_INT >= 31 && error == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS) {
+            startListeningSoon(getRateLimitRetryDelayMs());
+            return;
+        }
+
+        // Speech timeout and no-match are normal for an always-on loop.
+        startListeningSoon(getRestartDelayMs());
     }
 
     @Override public void onRmsChanged(float rmsdB) {}
