@@ -11,7 +11,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private static final int NOTIFICATION_ID = 46;
     private static final long RESTART_DELAY_MS = 100;
     private static final long BUSY_RESTART_DELAY_MS = 650;
-    private static final long TRIGGER_DELAY_MS = 100;
     private static final long PAUSE_AFTER_TRIGGER_MS = 45000;
 
     public static final String KEY_LISTENER_STATUS = "listener_status";
@@ -50,6 +49,12 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private int getAssistKeyCode() {
         return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .getInt(MainActivity.KEY_ASSIST_KEYCODE, MainActivity.DEFAULT_ASSIST_KEYCODE);
+    }
+
+    private int getTriggerDelayMs() {
+        int value = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                .getInt(MainActivity.KEY_TRIGGER_DELAY_MS, MainActivity.DEFAULT_TRIGGER_DELAY_MS);
+        return Math.max(0, Math.min(MainActivity.MAX_TRIGGER_DELAY_MS, value));
     }
 
     private String normalize(String s) {
@@ -125,7 +130,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
         if (pausedForAssistant) return;
         pausedForAssistant = true;
         final int keyCode = getAssistKeyCode();
-        setStatus("Activation phrase heard — opening assistant");
+        final int triggerDelayMs = getTriggerDelayMs();
+        setStatus("Activation phrase heard — opening assistant in " + triggerDelayMs + " ms");
 
         handler.removeCallbacks(startRunnable);
         if (recognizer != null) {
@@ -135,7 +141,9 @@ public class WakeListenerService extends Service implements RecognitionListener 
         }
 
         new Thread(() -> {
-            try { Thread.sleep(TRIGGER_DELAY_MS); } catch (InterruptedException ignored) {}
+            if (triggerDelayMs > 0) {
+                try { Thread.sleep(triggerDelayMs); } catch (InterruptedException ignored) {}
+            }
             ShizukuBridge.Result result = ShizukuBridge.sendKeyEvent(keyCode);
             handler.post(() -> {
                 if (result.success) {
