@@ -17,6 +17,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Prepare v1.2 smooth listener UI
+        run: |
+          sed -i 's/Hey ChatGPT Assist v1.1/Hey ChatGPT Assist v1.2/' app/src/main/java/com/example/heychatgptassist/MainActivity.java
+          sed -i 's/MAX_COMPLETE_SILENCE_MS = 15000/MAX_COMPLETE_SILENCE_MS = 120000/' app/src/main/java/com/example/heychatgptassist/MainActivity.java
+          sed -i 's/MAX_POSSIBLY_COMPLETE_SILENCE_MS = 15000/MAX_POSSIBLY_COMPLETE_SILENCE_MS = 120000/' app/src/main/java/com/example/heychatgptassist/MainActivity.java
+          sed -i 's/Always-listening assistant plus optional Siri-style response text over the real ChatGPT assistant popup./Always-listening assistant with smoother microphone handling, lower background churn for games, and optional Siri-style response text./' app/src/main/java/com/example/heychatgptassist/MainActivity.java
+          sed -i 's/handler.postDelayed(this, 250L);/handler.postDelayed(this, overlayView != null ? 250L : 1500L);/' app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -40,7 +48,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HeyChatGPTAssist-v1.1-apk
+          name: HeyChatGPTAssist-v1.2-apk
           path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
