@@ -30,9 +30,14 @@ public class MainActivity extends Activity {
     public static final String DEFAULT_WAKE_PHRASE = "Hey ChatGPT";
     public static final String KEY_ASSIST_KEYCODE = "assist_keycode";
     public static final int DEFAULT_ASSIST_KEYCODE = 231;
+
     public static final String KEY_TRIGGER_DELAY_MS = "trigger_delay_ms";
     public static final int DEFAULT_TRIGGER_DELAY_MS = 100;
     public static final int MAX_TRIGGER_DELAY_MS = 1000;
+
+    public static final String KEY_REARM_DELAY_MS = "rearm_delay_ms";
+    public static final int DEFAULT_REARM_DELAY_MS = 500;
+    public static final int MAX_REARM_DELAY_MS = 5000;
 
     private TextView status;
     private TextView diagnostics;
@@ -40,6 +45,7 @@ public class MainActivity extends Activity {
     private TextView selectedKey;
     private EditText phraseInput;
     private EditText delayInput;
+    private EditText rearmInput;
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable diagnosticUpdater = new Runnable() {
@@ -77,13 +83,13 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist v0.7");
+        title.setText("Hey ChatGPT Assist v0.8");
         title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\nHands-free assistant with adjustable trigger delay. Lower delay opens the assistant faster; raise it if your phone needs more time to release the microphone cleanly.");
+        desc.setText("\nAlways-listening mode. The old 45-second post-trigger pause is removed. After opening ChatGPT, the listener automatically re-arms and keeps retrying if Android temporarily reports the microphone/recognizer as busy.");
         desc.setTextSize(15);
         root.addView(desc);
 
@@ -92,6 +98,12 @@ public class MainActivity extends Activity {
         status.setTextSize(17);
         status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(status);
+
+        TextView always = new TextView(this);
+        always.setText("\nAlways listening: ON");
+        always.setTextSize(16);
+        always.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(always);
 
         TextView phraseLabel = new TextView(this);
         phraseLabel.setText("\nActivation phrase:");
@@ -135,11 +147,36 @@ public class MainActivity extends Activity {
         saveDelay.setOnClickListener(v -> saveTriggerDelay());
         root.addView(saveDelay);
 
+        TextView rearmLabel = new TextView(this);
+        rearmLabel.setText("\nRe-arm delay after opening assistant (milliseconds):");
+        rearmLabel.setTextSize(16);
+        rearmLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(rearmLabel);
+
+        rearmInput = new EditText(this);
+        rearmInput.setSingleLine(true);
+        rearmInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        rearmInput.setHint("0 to 5000");
+        rearmInput.setText(String.valueOf(getRearmDelayMs()));
+        root.addView(rearmInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView rearmHelp = new TextView(this);
+        rearmHelp.setText("How quickly the wake listener starts trying again after a trigger. Default = 500 ms. 0 = immediate. If ChatGPT has trouble hearing you, raise this a little.");
+        rearmHelp.setTextSize(13);
+        root.addView(rearmHelp);
+
+        Button saveRearm = new Button(this);
+        saveRearm.setText("Save re-arm delay");
+        saveRearm.setOnClickListener(v -> saveRearmDelay());
+        root.addView(saveRearm);
+
         Button start = new Button(this);
-        start.setText("START VOICE LISTENING");
+        start.setText("START ALWAYS LISTENING");
         start.setOnClickListener(v -> {
             saveWakePhrase();
             saveTriggerDelay();
+            saveRearmDelay();
             requestAndStart();
         });
         root.addView(start);
@@ -200,7 +237,7 @@ public class MainActivity extends Activity {
         root.addView(openShizuku);
 
         TextView note = new TextView(this);
-        note.setText("\nThe delay setting is saved permanently and is used every time your wake phrase is detected. You can change it without reinstalling the app.\n\nThe listener notification remains quiet and static so it does not constantly jump around in the notification list.");
+        note.setText("\nAlways-listening mode keeps the foreground listener service alive and automatically restarts speech recognition after normal timeouts, no-match results, and temporary busy errors. Android can still temporarily reserve the microphone for another app; when that happens this app keeps retrying automatically instead of waiting 45 seconds.\n\nYour trigger and re-arm delay settings are saved permanently.");
         note.setTextSize(13);
         root.addView(note);
 
@@ -337,6 +374,26 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Trigger delay saved: " + value + " ms", Toast.LENGTH_SHORT).show();
     }
 
+    private int getRearmDelayMs() {
+        int value = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getInt(KEY_REARM_DELAY_MS, DEFAULT_REARM_DELAY_MS);
+        return Math.max(0, Math.min(MAX_REARM_DELAY_MS, value));
+    }
+
+    private void saveRearmDelay() {
+        int value = DEFAULT_REARM_DELAY_MS;
+        try {
+            String raw = rearmInput.getText().toString().trim();
+            if (!raw.isEmpty()) value = Integer.parseInt(raw);
+        } catch (NumberFormatException ignored) {}
+
+        value = Math.max(0, Math.min(MAX_REARM_DELAY_MS, value));
+        rearmInput.setText(String.valueOf(value));
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putInt(KEY_REARM_DELAY_MS, value).apply();
+        Toast.makeText(this, "Re-arm delay saved: " + value + " ms", Toast.LENGTH_SHORT).show();
+    }
+
     private void requestAndStart() {
         if (!ShizukuBridge.hasPermission()) {
             status.setText("Status: Shizuku must be running and authorized");
@@ -350,7 +407,7 @@ public class MainActivity extends Activity {
 
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("Status: listening for ‘" + getWakePhrase() + "’ — delay " + getTriggerDelayMs() + " ms");
+        status.setText("Status: always listening for ‘" + getWakePhrase() + "’ — trigger " + getTriggerDelayMs() + " ms, re-arm " + getRearmDelayMs() + " ms");
     }
 
     @Override
