@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet" />
+  <title>Private Account Note</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: Canvas; color: CanvasText; }
+    .card { width: min(620px, 100%); border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 18px; padding: 20px; box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 10%, transparent); }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p { line-height: 1.45; opacity: .78; }
+    textarea { width: 100%; min-height: 220px; resize: vertical; padding: 14px; font: inherit; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; }
+    .note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 1.05rem; line-height: 1.55; padding: 14px 2px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    button { border: 0; border-radius: 12px; padding: 11px 15px; font: inherit; font-weight: 600; cursor: pointer; }
+    button.primary { background: Highlight; color: HighlightText; }
+    button.secondary { background: color-mix(in srgb, CanvasText 10%, Canvas); color: CanvasText; }
+    button.danger { background: color-mix(in srgb, #c00 15%, Canvas); color: CanvasText; }
+    .small { font-size: .86rem; opacity: .68; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <section id="setup" class="hidden">
+      <h1>Set up this device</h1>
+      <p>This page has no account login. Your note is stored only in this browser's private site storage on this device. Nothing you type here is saved in GitHub, the page source, Notes, Files, or Photos.</p>
+      <textarea id="editor" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Example:
+Fireworkstars46 — email@example.com
+Fireworkstars44 — other@example.com"></textarea>
+      <div class="row">
+        <button class="primary" id="save">Save on this device</button>
+      </div>
+      <p class="small">After saving once, opening this same link in this same browser goes straight to the note. Anyone opening the link on another device/browser sees only the setup screen, not your note.</p>
+    </section>
+
+    <section id="viewer" class="hidden">
+      <h1>Private Account Note</h1>
+      <div id="note" class="note"></div>
+      <div class="row">
+        <button class="secondary" id="edit">Edit</button>
+        <button class="danger" id="clear">Clear this device</button>
+      </div>
+      <p class="small">Stored only in this browser on this device. Clearing browser/site data or switching browsers removes access here.</p>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      'use strict';
+      const KEY = 'fs46_private_account_note_v1';
+      const setup = document.getElementById('setup');
+      const viewer = document.getElementById('viewer');
+      const editor = document.getElementById('editor');
+      const note = document.getElementById('note');
+      const save = document.getElementById('save');
+      const edit = document.getElementById('edit');
+      const clear = document.getElementById('clear');
+
+      function getSaved() {
+        try { return localStorage.getItem(KEY); } catch { return null; }
+      }
+
+      function showSetup(value = '') {
+        viewer.classList.add('hidden');
+        setup.classList.remove('hidden');
+        editor.value = value;
+        editor.focus();
+      }
+
+      function showViewer(value) {
+        setup.classList.add('hidden');
+        viewer.classList.remove('hidden');
+        note.textContent = value;
+      }
+
+      const saved = getSaved();
+      if (saved !== null) showViewer(saved);
+      else showSetup();
+
+      save.addEventListener('click', () => {
+        try {
+          localStorage.setItem(KEY, editor.value);
+          showViewer(editor.value);
+        } catch {
+          alert('This browser blocked local storage. Try opening the page in Safari, Chrome, or Samsung Internet instead of a private/incognito tab.');
+        }
+      });
+
+      edit.addEventListener('click', () => showSetup(getSaved() ?? ''));
+
+      clear.addEventListener('click', () => {
+        if (!confirm('Remove the private note from this browser on this device?')) return;
+        try { localStorage.removeItem(KEY); } catch {}
+        showSetup();
+      });
+    })();
+  </script>
+</body>
+</html>
