@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Typeface;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -29,12 +30,16 @@ public class MainActivity extends Activity {
     public static final String DEFAULT_WAKE_PHRASE = "Hey ChatGPT";
     public static final String KEY_ASSIST_KEYCODE = "assist_keycode";
     public static final int DEFAULT_ASSIST_KEYCODE = 231;
+    public static final String KEY_TRIGGER_DELAY_MS = "trigger_delay_ms";
+    public static final int DEFAULT_TRIGGER_DELAY_MS = 100;
+    public static final int MAX_TRIGGER_DELAY_MS = 1000;
 
     private TextView status;
     private TextView diagnostics;
     private TextView shizukuStatus;
     private TextView selectedKey;
     private EditText phraseInput;
+    private EditText delayInput;
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable diagnosticUpdater = new Runnable() {
@@ -72,13 +77,13 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist v0.6");
+        title.setText("Hey ChatGPT Assist v0.7");
         title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\nSmoother hands-free mode: faster trigger, quieter notification, fewer listener restarts, and a fully scrollable settings screen.");
+        desc.setText("\nHands-free assistant with adjustable trigger delay. Lower delay opens the assistant faster; raise it if your phone needs more time to release the microphone cleanly.");
         desc.setTextSize(15);
         root.addView(desc);
 
@@ -88,11 +93,11 @@ public class MainActivity extends Activity {
         status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(status);
 
-        TextView label = new TextView(this);
-        label.setText("\nActivation phrase:");
-        label.setTextSize(16);
-        label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(label);
+        TextView phraseLabel = new TextView(this);
+        phraseLabel.setText("\nActivation phrase:");
+        phraseLabel.setTextSize(16);
+        phraseLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(phraseLabel);
 
         phraseInput = new EditText(this);
         phraseInput.setSingleLine(true);
@@ -106,10 +111,35 @@ public class MainActivity extends Activity {
         savePhrase.setOnClickListener(v -> saveWakePhrase());
         root.addView(savePhrase);
 
+        TextView delayLabel = new TextView(this);
+        delayLabel.setText("\nAssistant trigger delay (milliseconds):");
+        delayLabel.setTextSize(16);
+        delayLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(delayLabel);
+
+        delayInput = new EditText(this);
+        delayInput.setSingleLine(true);
+        delayInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        delayInput.setHint("0 to 1000");
+        delayInput.setText(String.valueOf(getTriggerDelayMs()));
+        root.addView(delayInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView delayHelp = new TextView(this);
+        delayHelp.setText("0 = fastest. Default = 100 ms. Allowed range: 0–1000 ms.");
+        delayHelp.setTextSize(13);
+        root.addView(delayHelp);
+
+        Button saveDelay = new Button(this);
+        saveDelay.setText("Save trigger delay");
+        saveDelay.setOnClickListener(v -> saveTriggerDelay());
+        root.addView(saveDelay);
+
         Button start = new Button(this);
         start.setText("START VOICE LISTENING");
         start.setOnClickListener(v -> {
             saveWakePhrase();
+            saveTriggerDelay();
             requestAndStart();
         });
         root.addView(start);
@@ -170,7 +200,7 @@ public class MainActivity extends Activity {
         root.addView(openShizuku);
 
         TextView note = new TextView(this);
-        note.setText("\nThe listener notification is now silent, low-priority, and kept static so it should stop jumping around in the notification list. Android/Samsung still controls final notification ordering.\n\nYou can scroll all the way to the bottom now.");
+        note.setText("\nThe delay setting is saved permanently and is used every time your wake phrase is detected. You can change it without reinstalling the app.\n\nThe listener notification remains quiet and static so it does not constantly jump around in the notification list.");
         note.setTextSize(13);
         root.addView(note);
 
@@ -287,6 +317,26 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
     }
 
+    private int getTriggerDelayMs() {
+        int value = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getInt(KEY_TRIGGER_DELAY_MS, DEFAULT_TRIGGER_DELAY_MS);
+        return Math.max(0, Math.min(MAX_TRIGGER_DELAY_MS, value));
+    }
+
+    private void saveTriggerDelay() {
+        int value = DEFAULT_TRIGGER_DELAY_MS;
+        try {
+            String raw = delayInput.getText().toString().trim();
+            if (!raw.isEmpty()) value = Integer.parseInt(raw);
+        } catch (NumberFormatException ignored) {}
+
+        value = Math.max(0, Math.min(MAX_TRIGGER_DELAY_MS, value));
+        delayInput.setText(String.valueOf(value));
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putInt(KEY_TRIGGER_DELAY_MS, value).apply();
+        Toast.makeText(this, "Trigger delay saved: " + value + " ms", Toast.LENGTH_SHORT).show();
+    }
+
     private void requestAndStart() {
         if (!ShizukuBridge.hasPermission()) {
             status.setText("Status: Shizuku must be running and authorized");
@@ -300,7 +350,7 @@ public class MainActivity extends Activity {
 
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("Status: listening for ‘" + getWakePhrase() + "’");
+        status.setText("Status: listening for ‘" + getWakePhrase() + "’ — delay " + getTriggerDelayMs() + " ms");
     }
 
     @Override
