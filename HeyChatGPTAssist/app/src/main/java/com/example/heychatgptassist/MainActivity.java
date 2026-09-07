@@ -8,6 +8,8 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.graphics.Typeface;
 import android.view.Gravity;
@@ -25,7 +27,15 @@ public class MainActivity extends Activity {
     public static final String DEFAULT_WAKE_PHRASE = "Hey ChatGPT";
 
     private TextView status;
+    private TextView diagnostics;
     private EditText phraseInput;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable diagnosticUpdater = new Runnable() {
+        @Override public void run() {
+            updateDiagnostics();
+            uiHandler.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,15 +47,14 @@ public class MainActivity extends Activity {
         root.setGravity(Gravity.TOP);
 
         TextView title = new TextView(this);
-        title.setText("Hey ChatGPT Assist");
+        title.setText("Hey ChatGPT Assist v0.4");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView desc = new TextView(this);
-        desc.setText("\nThis version launches ChatGPT's own assistant/voice activity directly — the same internal assistant screen used by Android assistant shortcuts.\n\n" +
-                "FIRST TEST: keep ChatGPT selected as your default Digital assistant, then tap TEST CHATGPT ASSISTANT below. No voice listener is needed for this first test.");
+        desc.setText("\nTEST CHATGPT ASSISTANT checks the launch action. START VOICE LISTENING runs the hands-free listener. v0.4 also shows exactly what the speech listener is doing/hearing.");
         desc.setTextSize(16);
         root.addView(desc);
 
@@ -82,6 +91,11 @@ public class MainActivity extends Activity {
         status.setTextSize(17);
         root.addView(status);
 
+        diagnostics = new TextView(this);
+        diagnostics.setText("Listener details: not started");
+        diagnostics.setTextSize(15);
+        root.addView(diagnostics);
+
         Button start = new Button(this);
         start.setText("Start voice listening");
         start.setOnClickListener(v -> {
@@ -95,17 +109,37 @@ public class MainActivity extends Activity {
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, WakeListenerService.class));
             status.setText("\nStatus: stopped\n");
+            updateDiagnostics();
         });
         root.addView(stop);
 
         TextView note = new TextView(this);
-        note.setText("\nFor the voice wake test, Android may require ‘Appear on top’ so a background listener is allowed to bring up ChatGPT. " +
-                "The listener releases its microphone before launching ChatGPT Voice.\n\n" +
-                "If TEST CHATGPT ASSISTANT does not show ChatGPT, tell me exactly what appears or sounds before testing the wake phrase.");
+        note.setText("\nTest v0.4 first while this screen is open. After tapping START VOICE LISTENING, wait until Listener details says ‘Mic ready’, then say your phrase. If it works here, try it again from the Home screen. The persistent notification shows the same listener status outside the app.");
         note.setTextSize(14);
         root.addView(note);
 
         setContentView(root);
+        updateDiagnostics();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        uiHandler.removeCallbacks(diagnosticUpdater);
+        uiHandler.post(diagnosticUpdater);
+    }
+
+    @Override protected void onPause() {
+        uiHandler.removeCallbacks(diagnosticUpdater);
+        super.onPause();
+    }
+
+    private void updateDiagnostics() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String listener = prefs.getString(WakeListenerService.KEY_LISTENER_STATUS, "Not started");
+        String heard = prefs.getString(WakeListenerService.KEY_LAST_HEARD, "");
+        String text = "Listener details: " + listener;
+        if (!heard.isEmpty()) text += "\nLast heard: " + heard;
+        if (diagnostics != null) diagnostics.setText(text);
     }
 
     private void testAssistant() {
@@ -150,7 +184,7 @@ public class MainActivity extends Activity {
         }
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("\nStatus: listening for ‘" + getWakePhrase() + "’\n");
+        status.setText("\nStatus: starting listener for ‘" + getWakePhrase() + "’\n");
     }
 
     @Override
