@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(48, 56, 48, 48);
+        root.setPadding(48, 48, 48, 48);
         root.setGravity(Gravity.TOP);
 
         TextView title = new TextView(this);
@@ -43,11 +43,17 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView desc = new TextView(this);
-        desc.setText("\nChoose any wake phrase you want. When the app hears it, " +
-                "it releases the microphone and asks Android to launch your current default digital assistant.\n\n" +
-                "Set ChatGPT as your default Digital assistant first.");
-        desc.setTextSize(17);
+        desc.setText("\nThis version uses Android Accessibility's system ‘Show Assistant’ action so it behaves more like your assistant button.\n\n" +
+                "1. Keep ChatGPT selected as your default Digital assistant.\n" +
+                "2. Enable Hey ChatGPT Assist under Accessibility.\n" +
+                "3. Test the assistant button below before starting voice listening.");
+        desc.setTextSize(16);
         root.addView(desc);
+
+        Button accessibility = new Button(this);
+        accessibility.setText("Open Accessibility settings");
+        accessibility.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility);
 
         TextView label = new TextView(this);
         label.setText("\nCustom activation phrase:");
@@ -72,48 +78,57 @@ public class MainActivity extends Activity {
         status.setTextSize(17);
         root.addView(status);
 
+        Button test = new Button(this);
+        test.setText("TEST SYSTEM ASSISTANT");
+        test.setOnClickListener(v -> testAssistant());
+        root.addView(test);
+
         Button start = new Button(this);
-        start.setText("Start listening");
+        start.setText("Start voice listening");
         start.setOnClickListener(v -> {
             saveWakePhrase();
+            if (!AssistantAccessibilityService.isConnected()) {
+                status.setText("\nAccessibility service is not enabled yet. Tap Open Accessibility settings first.\n");
+                return;
+            }
             requestAndStart();
         });
         root.addView(start);
 
         Button stop = new Button(this);
-        stop.setText("Stop listening");
+        stop.setText("Stop voice listening");
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, WakeListenerService.class));
             status.setText("\nStatus: stopped\n");
         });
         root.addView(stop);
 
-        Button test = new Button(this);
-        test.setText("Test default assistant");
-        test.setOnClickListener(v -> launchAssistant());
-        root.addView(test);
-
-        Button defaults = new Button(this);
-        defaults.setText("Open default assistant settings");
-        defaults.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS));
-            } catch (Exception e) {
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
-            }
-        });
-        root.addView(defaults);
-
         TextView note = new TextView(this);
-        note.setText("\nNotes:\n• Your custom phrase is saved on the phone.\n" +
-                "• Android shows a microphone/privacy indicator while listening.\n" +
-                "• Keep the persistent notification enabled.\n" +
-                "• After triggering, listening pauses for 45 seconds so ChatGPT Voice can use the microphone.\n" +
-                "• Active Discord/phone calls may prevent the wake listener or ChatGPT Voice from using the microphone.");
-        note.setTextSize(15);
+        note.setText("\nPrivacy: the Accessibility service does not read screen content or type anything. It is used only for Android's global Show Assistant command. " +
+                "The microphone listener is separate and can be stopped at any time.\n\n" +
+                "After a wake phrase is detected, this app releases the mic before showing ChatGPT so ChatGPT Voice can take it.");
+        note.setTextSize(14);
         root.addView(note);
 
         setContentView(root);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (status != null && AssistantAccessibilityService.isConnected()) {
+            status.setText("\nAccessibility assistant trigger: ready\n");
+        }
+    }
+
+    private void testAssistant() {
+        if (!AssistantAccessibilityService.isConnected()) {
+            status.setText("\nEnable Hey ChatGPT Assist in Accessibility first, then return and test again.\n");
+            return;
+        }
+        boolean ok = AssistantAccessibilityService.showAssistant();
+        status.setText(ok ? "\nAssistant action sent. ChatGPT should appear.\n"
+                          : "\nAndroid did not accept the Show Assistant action.\n");
     }
 
     private String getWakePhrase() {
@@ -126,9 +141,7 @@ public class MainActivity extends Activity {
         if (phrase.isEmpty()) phrase = DEFAULT_WAKE_PHRASE;
         phraseInput.setText(phrase);
         getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit()
-                .putString(KEY_WAKE_PHRASE, phrase)
-                .apply();
+                .edit().putString(KEY_WAKE_PHRASE, phrase).apply();
         Toast.makeText(this, "Activation phrase saved: " + phrase, Toast.LENGTH_SHORT).show();
     }
 
@@ -137,33 +150,19 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
             return;
         }
-
         if (Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_MIC);
             return;
         }
-
         Intent service = new Intent(this, WakeListenerService.class);
         startForegroundService(service);
-        status.setText("\nStatus: listening for “" + getWakePhrase() + "”\n");
+        status.setText("\nStatus: listening for ‘" + getWakePhrase() + "’\n");
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_MIC) {
-            requestAndStart();
-        }
-    }
-
-    private void launchAssistant() {
-        try {
-            Intent assist = new Intent(Intent.ACTION_ASSIST);
-            assist.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(assist);
-        } catch (Exception e) {
-            status.setText("\nCould not launch the default assistant: " + e.getClass().getSimpleName() + "\n");
-        }
+        if (requestCode == REQ_MIC) requestAndStart();
     }
 }

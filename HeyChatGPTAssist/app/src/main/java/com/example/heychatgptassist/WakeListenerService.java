@@ -116,12 +116,9 @@ public class WakeListenerService extends Service implements RecognitionListener 
         recognizer = null;
 
         handler.postDelayed(() -> {
-            try {
-                Intent assist = new Intent(Intent.ACTION_ASSIST);
-                assist.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(assist);
-            } catch (Throwable t) {
-                updateNotification("Android blocked assistant launch — open app and use Test");
+            boolean ok = AssistantAccessibilityService.showAssistant();
+            if (!ok) {
+                updateNotification("Enable Accessibility service, then test again");
             }
         }, 450);
 
