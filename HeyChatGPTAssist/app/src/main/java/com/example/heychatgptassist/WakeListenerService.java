@@ -9,6 +9,7 @@ import java.util.*;
 public class WakeListenerService extends Service implements RecognitionListener {
     private static final String CHANNEL = "wake_listener_quiet_v06";
     private static final int NOTIFICATION_ID = 46;
+    private static final String KEY_SMOOTH_MIGRATED = "smooth_listener_migrated_v12";
 
     public static final String KEY_LISTENER_STATUS = "listener_status";
     public static final String KEY_LAST_HEARD = "last_heard";
@@ -20,12 +21,22 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private final Runnable rearmRunnable = this::rearmAfterTrigger;
     private boolean stopping = false;
     private boolean pausedForAssistant = false;
+    private boolean forceSystemRecognizer = false;
+    private boolean usingOnDeviceRecognizer = false;
+
+    // Keep routine callback traffic out of SharedPreferences as much as possible.
+    // This matters when a game is running and the recognizer is producing lots of
+    // partial/noise updates in the background.
+    private String lastStatusWritten = "";
+    private String lastHeardWritten = "";
+    private long lastHeardWriteUptime = 0L;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
         startForeground(NOTIFICATION_ID, notification());
+        migrateSmoothDefaults();
         setupRecognizer();
     }
 
@@ -35,10 +46,30 @@ public class WakeListenerService extends Service implements RecognitionListener 
         pausedForAssistant = false;
         handler.removeCallbacks(rearmRunnable);
         handler.removeCallbacks(startRunnable);
+        migrateSmoothDefaults();
         try { setupRecognizer(); } catch (Throwable ignored) {}
         setStatus("Always listening for ‘" + getWakePhrase() + "’");
         startListeningSoon(getInitialListenDelayMs());
         return START_STICKY;
+    }
+
+    private void migrateSmoothDefaults() {
+        SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(KEY_SMOOTH_MIGRATED, false)) return;
+
+        SharedPreferences.Editor editor = prefs.edit();
+
+        // v1.1 used 3.5s / 1.8s silence values. On Samsung that can make the
+        // speech session close/reopen often, which repeatedly animates the green
+        // microphone privacy indicator and can briefly disturb an immersive game.
+        // Only migrate values that are still exactly the old defaults; any value
+        // the user already customized is left untouched.
+        int complete = prefs.getInt(MainActivity.KEY_COMPLETE_SILENCE_MS, 3500);
+        int possible = prefs.getInt(MainActivity.KEY_POSSIBLY_COMPLETE_SILENCE_MS, 1800);
+        if (complete == 3500) editor.putInt(MainActivity.KEY_COMPLETE_SILENCE_MS, 60000);
+        if (possible == 1800) editor.putInt(MainActivity.KEY_POSSIBLY_COMPLETE_SILENCE_MS, 30000);
+
+        editor.putBoolean(KEY_SMOOTH_MIGRATED, true).apply();
     }
 
     private int getIntPref(String key, int defaultValue, int maxValue) {
@@ -113,6 +144,24 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 .trim();
     }
 
+    private SpeechRecognizer createBestRecognizer() {
+        usingOnDeviceRecognizer = false;
+
+        if (!forceSystemRecognizer && Build.VERSION.SDK_INT >= 31) {
+            try {
+                if (SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
+                    SpeechRecognizer local = SpeechRecognizer.createOnDeviceSpeechRecognizer(this);
+                    usingOnDeviceRecognizer = true;
+                    return local;
+                }
+            } catch (Throwable ignored) {
+                usingOnDeviceRecognizer = false;
+            }
+        }
+
+        return SpeechRecognizer.createSpeechRecognizer(this);
+    }
+
     private void setupRecognizer() {
         if (recognizer != null) {
             try { recognizer.cancel(); } catch (Throwable ignored) {}
@@ -120,20 +169,30 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer = null;
         }
 
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        recognizer = createBestRecognizer();
         recognizer.setRecognitionListener(this);
 
         recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
                 (long) getCompleteSilenceMs());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
                 (long) getPossiblyCompleteSilenceMs());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
                 (long) getMinSpeechMs());
+
+        // Android 13+ recognizers may support segmented sessions. When supported,
+        // this lets one recognition session stay alive longer instead of repeatedly
+        // releasing/reacquiring the microphone every few seconds.
+        if (Build.VERSION.SDK_INT >= 33) {
+            recognizerIntent.putExtra(
+                    RecognizerIntent.EXTRA_SEGMENTED_SESSION,
+                    RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS);
+        }
     }
 
     private void startListeningSoon(long delayMs) {
@@ -173,9 +232,26 @@ public class WakeListenerService extends Service implements RecognitionListener 
 
     private void rememberHeard(ArrayList<String> results) {
         String heard = firstResult(results);
-        if (heard.isEmpty()) return;
+        if (heard.isEmpty() || heard.equals(lastHeardWritten)) return;
+
+        long now = SystemClock.uptimeMillis();
+        if (now - lastHeardWriteUptime < 750L) return;
+
+        lastHeardWriteUptime = now;
+        lastHeardWritten = heard;
         getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .edit().putString(KEY_LAST_HEARD, heard).apply();
+    }
+
+    private void handleRecognitionBundle(Bundle bundle, boolean restartWhenNoMatch) {
+        if (bundle == null) return;
+        ArrayList<String> list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        rememberHeard(list);
+        if (hasWakePhrase(list)) {
+            triggerAssistant();
+        } else if (restartWhenNoMatch && !pausedForAssistant && !stopping) {
+            startListeningSoon(getRestartDelayMs());
+        }
     }
 
     private void triggerAssistant() {
@@ -197,9 +273,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer = null;
         }
 
-        // Mark the start of the real ChatGPT assistant session. The optional
-        // Accessibility companion uses this timestamp so it only mirrors text
-        // from ChatGPT after this helper actually opened the assistant.
         getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .edit()
                 .putLong(ChatGPTTextAccessibilityService.KEY_LAST_ASSIST_TRIGGER_MS,
@@ -238,6 +311,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
     }
 
     private void setStatus(String text) {
+        if (text == null || text.equals(lastStatusWritten)) return;
+        lastStatusWritten = text;
         getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
                 .edit().putString(KEY_LISTENER_STATUS, text).apply();
     }
@@ -249,19 +324,19 @@ public class WakeListenerService extends Service implements RecognitionListener 
     @Override public void onBeginningOfSpeech() {}
 
     @Override public void onPartialResults(Bundle partialResults) {
-        ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        rememberHeard(list);
-        if (hasWakePhrase(list)) triggerAssistant();
+        handleRecognitionBundle(partialResults, false);
     }
 
     @Override public void onResults(Bundle results) {
-        ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        rememberHeard(list);
-        if (hasWakePhrase(list)) {
-            triggerAssistant();
-        } else if (!pausedForAssistant && !stopping) {
-            startListeningSoon(getRestartDelayMs());
-        }
+        handleRecognitionBundle(results, true);
+    }
+
+    @Override public void onSegmentResults(Bundle segmentResults) {
+        handleRecognitionBundle(segmentResults, false);
+    }
+
+    @Override public void onEndOfSegmentedSession() {
+        if (!pausedForAssistant && !stopping) startListeningSoon(getRestartDelayMs());
     }
 
     @Override public void onError(int error) {
@@ -269,6 +344,17 @@ public class WakeListenerService extends Service implements RecognitionListener 
 
         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
             setStatus("Microphone permission required");
+            return;
+        }
+
+        // If the dedicated local recognizer exists but its language pack is not
+        // available, fall back to the normal system recognizer automatically.
+        if (usingOnDeviceRecognizer && Build.VERSION.SDK_INT >= 31 &&
+                (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)) {
+            forceSystemRecognizer = true;
+            try { setupRecognizer(); } catch (Throwable ignored) { recognizer = null; }
+            startListeningSoon(getBusyRetryDelayMs());
             return;
         }
 
