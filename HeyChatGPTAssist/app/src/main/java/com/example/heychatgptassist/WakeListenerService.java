@@ -197,6 +197,15 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer = null;
         }
 
+        // Mark the start of the real ChatGPT assistant session. The optional
+        // Accessibility companion uses this timestamp so it only mirrors text
+        // from ChatGPT after this helper actually opened the assistant.
+        getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                .edit()
+                .putLong(ChatGPTTextAccessibilityService.KEY_LAST_ASSIST_TRIGGER_MS,
+                        System.currentTimeMillis())
+                .apply();
+
         new Thread(() -> {
             if (triggerDelayMs > 0) {
                 try { Thread.sleep(triggerDelayMs); } catch (InterruptedException ignored) {}
@@ -264,8 +273,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
         }
 
         if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
-            // A common short-lived condition while ChatGPT is releasing the mic.
-            // Avoid rebuilding everything; cancel and retry at the user's interval.
             if (recognizer != null) {
                 try { recognizer.cancel(); } catch (Throwable ignored) {}
             }
@@ -285,7 +292,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             return;
         }
 
-        // Speech timeout and no-match are normal for an always-on loop.
         startListeningSoon(getRestartDelayMs());
     }
 
