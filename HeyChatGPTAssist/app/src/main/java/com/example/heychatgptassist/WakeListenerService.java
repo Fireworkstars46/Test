@@ -46,6 +46,11 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 .trim();
     }
 
+    private int getAssistKeyCode() {
+        return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                .getInt(MainActivity.KEY_ASSIST_KEYCODE, MainActivity.DEFAULT_ASSIST_KEYCODE);
+    }
+
     private String normalize(String s) {
         if (s == null) return "";
         return s.toLowerCase(Locale.US)
@@ -62,8 +67,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer = null;
         }
 
-        // Use the phone's normal/default speech recognition provider. On Samsung this is
-        // generally more reliable for a foreground service than forcing the on-device provider.
         recognizer = SpeechRecognizer.createSpeechRecognizer(this);
         recognizer.setRecognitionListener(this);
 
@@ -125,7 +128,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
         if (pausedForAssistant) return;
         pausedForAssistant = true;
         listening = false;
-        setStatus("Phrase matched — opening ChatGPT");
+        final int keyCode = getAssistKeyCode();
+        setStatus("Phrase matched — sending Android assist key " + keyCode);
 
         handler.removeCallbacks(startRunnable);
         if (recognizer != null) {
@@ -134,10 +138,17 @@ public class WakeListenerService extends Service implements RecognitionListener 
             recognizer = null;
         }
 
-        handler.postDelayed(() -> {
-            boolean ok = AssistantAccessibilityService.showAssistant(this);
-            if (!ok) setStatus("Phrase matched, but ChatGPT could not open");
-        }, 500);
+        new Thread(() -> {
+            try { Thread.sleep(350); } catch (InterruptedException ignored) {}
+            ShizukuBridge.Result result = ShizukuBridge.sendKeyEvent(keyCode);
+            handler.post(() -> {
+                if (result.success) {
+                    setStatus("Assist key " + keyCode + " sent — listener paused for ChatGPT");
+                } else {
+                    setStatus("Wake phrase matched, but " + result.message);
+                }
+            });
+        }, "shizuku-wake-trigger").start();
 
         handler.postDelayed(() -> {
             if (stopping) return;
