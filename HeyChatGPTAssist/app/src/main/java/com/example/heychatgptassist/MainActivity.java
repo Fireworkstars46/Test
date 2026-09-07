@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -43,17 +44,20 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView desc = new TextView(this);
-        desc.setText("\nThis version uses Android Accessibility's system ‘Show Assistant’ action so it behaves more like your assistant button.\n\n" +
-                "1. Keep ChatGPT selected as your default Digital assistant.\n" +
-                "2. Enable Hey ChatGPT Assist under Accessibility.\n" +
-                "3. Test the assistant button below before starting voice listening.");
+        desc.setText("\nThis version launches ChatGPT's own assistant/voice activity directly — the same internal assistant screen used by Android assistant shortcuts.\n\n" +
+                "FIRST TEST: keep ChatGPT selected as your default Digital assistant, then tap TEST CHATGPT ASSISTANT below. No voice listener is needed for this first test.");
         desc.setTextSize(16);
         root.addView(desc);
 
-        Button accessibility = new Button(this);
-        accessibility.setText("Open Accessibility settings");
-        accessibility.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(accessibility);
+        Button test = new Button(this);
+        test.setText("TEST CHATGPT ASSISTANT");
+        test.setOnClickListener(v -> testAssistant());
+        root.addView(test);
+
+        Button overlay = new Button(this);
+        overlay.setText("Allow appear on top (for hands-free mode)");
+        overlay.setOnClickListener(v -> openOverlaySettings());
+        root.addView(overlay);
 
         TextView label = new TextView(this);
         label.setText("\nCustom activation phrase:");
@@ -78,19 +82,10 @@ public class MainActivity extends Activity {
         status.setTextSize(17);
         root.addView(status);
 
-        Button test = new Button(this);
-        test.setText("TEST SYSTEM ASSISTANT");
-        test.setOnClickListener(v -> testAssistant());
-        root.addView(test);
-
         Button start = new Button(this);
         start.setText("Start voice listening");
         start.setOnClickListener(v -> {
             saveWakePhrase();
-            if (!AssistantAccessibilityService.isConnected()) {
-                status.setText("\nAccessibility service is not enabled yet. Tap Open Accessibility settings first.\n");
-                return;
-            }
             requestAndStart();
         });
         root.addView(start);
@@ -104,31 +99,29 @@ public class MainActivity extends Activity {
         root.addView(stop);
 
         TextView note = new TextView(this);
-        note.setText("\nPrivacy: the Accessibility service does not read screen content or type anything. It is used only for Android's global Show Assistant command. " +
-                "The microphone listener is separate and can be stopped at any time.\n\n" +
-                "After a wake phrase is detected, this app releases the mic before showing ChatGPT so ChatGPT Voice can take it.");
+        note.setText("\nFor the voice wake test, Android may require ‘Appear on top’ so a background listener is allowed to bring up ChatGPT. " +
+                "The listener releases its microphone before launching ChatGPT Voice.\n\n" +
+                "If TEST CHATGPT ASSISTANT does not show ChatGPT, tell me exactly what appears or sounds before testing the wake phrase.");
         note.setTextSize(14);
         root.addView(note);
 
         setContentView(root);
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (status != null && AssistantAccessibilityService.isConnected()) {
-            status.setText("\nAccessibility assistant trigger: ready\n");
-        }
+    private void testAssistant() {
+        boolean ok = AssistantAccessibilityService.showAssistant(this);
+        status.setText(ok ? "\nLaunch sent to ChatGPT assistant.\n"
+                          : "\nCould not launch the ChatGPT assistant activity.\n");
     }
 
-    private void testAssistant() {
-        if (!AssistantAccessibilityService.isConnected()) {
-            status.setText("\nEnable Hey ChatGPT Assist in Accessibility first, then return and test again.\n");
-            return;
+    private void openOverlaySettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Throwable e) {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
         }
-        boolean ok = AssistantAccessibilityService.showAssistant();
-        status.setText(ok ? "\nAssistant action sent. ChatGPT should appear.\n"
-                          : "\nAndroid did not accept the Show Assistant action.\n");
     }
 
     private String getWakePhrase() {
