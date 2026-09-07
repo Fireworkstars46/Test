@@ -195,8 +195,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
         } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
             setStatus("Microphone permission required");
         } else {
-            // Normal timeouts / no-match cycles are expected for SpeechRecognizer.
-            // Restart quickly without changing the visible status or notification.
             startListeningSoon(RESTART_DELAY_MS);
         }
     }
@@ -229,7 +227,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setSilent(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setPriority(Notification.PRIORITY_MIN)
                 .setContentIntent(pi)
