@@ -17,23 +17,390 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Prepare v1.4 popup-first build
+      - name: Prepare v1.5 assistant popup text capture
         run: |
+          cat > app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java <<'JAVA'
+          package com.example.heychatgptassist;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.AccessibilityServiceInfo;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.PixelFormat;
+          import android.graphics.Rect;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.text.TextUtils;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.view.accessibility.AccessibilityWindowInfo;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import java.util.ArrayList;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.Set;
+
+          public class ChatGPTTextAccessibilityService extends AccessibilityService {
+              public static final String KEY_LAST_ASSIST_TRIGGER_MS = "last_assist_trigger_ms";
+              public static final String KEY_LAST_CAPTURED_TEXT = "last_captured_response_text";
+              public static final String KEY_LAST_WINDOW_DEBUG = "last_assistant_window_debug";
+              public static final String KEY_TEMP_REQUEST_MS = "temp_voice_request_ms";
+              public static final String KEY_TEMP_AUTOMATION_STATUS = "temp_voice_automation_status";
+
+              private static final String CHATGPT_PACKAGE = "com.openai.chatgpt";
+              private static final long ASSIST_SESSION_WINDOW_MS = 2L * 60L * 1000L;
+
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private final Set<String> previousSnapshot = new LinkedHashSet<>();
+              private long lastTriggerSeen = -1L;
+              private String lastDisplayed = "";
+
+              private WindowManager windowManager;
+              private View overlayView;
+              private TextView overlayText;
+
+              private final Runnable hideRunnable = this::hideOverlay;
+
+              @Override
+              protected void onServiceConnected() {
+                  super.onServiceConnected();
+                  windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  AccessibilityServiceInfo info = getServiceInfo();
+                  if (info != null) {
+                      info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+                      info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+                      info.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+                      setServiceInfo(info);
+                  }
+                  prefs().edit()
+                          .putString(KEY_TEMP_AUTOMATION_STATUS,
+                                  "v1.5: popup-first mode; Temporary automation disabled")
+                          .apply();
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
+                  if (event == null) return;
+                  if (!isResponseTextEnabled()) {
+                      hideOverlay();
+                      return;
+                  }
+                  if (!isRecentAssistSession()) return;
+
+                  CharSequence rawEventPackage = event.getPackageName();
+                  String eventPackage = rawEventPackage == null ? "" : rawEventPackage.toString();
+
+                  List<String> windowPackages = new ArrayList<>();
+                  List<String> rootStrings = new ArrayList<>();
+                  collectAssistantWindowData(windowPackages, rootStrings);
+                  updateDebug(eventPackage, windowPackages, rootStrings);
+
+                  if (!hasLikelyAssistantPackage(windowPackages)) {
+                      hideOverlay();
+                      previousSnapshot.clear();
+                      lastDisplayed = "";
+                      return;
+                  }
+
+                  long trigger = prefs().getLong(KEY_LAST_ASSIST_TRIGGER_MS, 0L);
+                  if (trigger != lastTriggerSeen) {
+                      lastTriggerSeen = trigger;
+                      previousSnapshot.clear();
+                      previousSnapshot.addAll(rootStrings);
+                      lastDisplayed = "";
+                  }
+
+                  List<String> eventStrings = new ArrayList<>();
+                  if (isLikelyAssistantPackage(eventPackage)) {
+                      if (event.getText() != null) {
+                          for (CharSequence cs : event.getText()) addCleanString(eventStrings, cs);
+                      }
+                      addCleanString(eventStrings, event.getContentDescription());
+                  }
+
+                  String candidate = chooseCandidate(rootStrings, eventStrings);
+                  previousSnapshot.clear();
+                  previousSnapshot.addAll(rootStrings);
+
+                  if (!TextUtils.isEmpty(candidate) && !candidate.equals(lastDisplayed)) {
+                      lastDisplayed = candidate;
+                      prefs().edit().putString(KEY_LAST_CAPTURED_TEXT, candidate).apply();
+                      showOverlay(candidate);
+                  }
+              }
+
+              private SharedPreferences prefs() {
+                  return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+              }
+
+              private boolean isResponseTextEnabled() {
+                  return prefs().getBoolean(MainActivity.KEY_RESPONSE_TEXT_ENABLED, true);
+              }
+
+              private boolean isRecentAssistSession() {
+                  long trigger = prefs().getLong(KEY_LAST_ASSIST_TRIGGER_MS, 0L);
+                  if (trigger <= 0L) return false;
+                  long age = System.currentTimeMillis() - trigger;
+                  return age >= 0L && age <= ASSIST_SESSION_WINDOW_MS;
+              }
+
+              private void collectAssistantWindowData(List<String> packages, List<String> strings) {
+                  List<AccessibilityWindowInfo> windows = getWindows();
+                  if (windows == null) return;
+                  for (AccessibilityWindowInfo window : windows) {
+                      if (window == null) continue;
+                      AccessibilityNodeInfo root = null;
+                      try { root = window.getRoot(); } catch (Throwable ignored) {}
+                      if (root == null) continue;
+                      CharSequence pkgCs = root.getPackageName();
+                      String pkg = pkgCs == null ? "" : pkgCs.toString();
+                      if (!pkg.isEmpty() && !packages.contains(pkg)) packages.add(pkg);
+                      if (!isLikelyAssistantPackage(pkg)) continue;
+                      int[] visited = new int[] {0};
+                      collectStrings(root, strings, visited);
+                  }
+              }
+
+              private boolean hasLikelyAssistantPackage(List<String> packages) {
+                  for (String pkg : packages) if (isLikelyAssistantPackage(pkg)) return true;
+                  return false;
+              }
+
+              private boolean isLikelyAssistantPackage(String pkg) {
+                  if (pkg == null || pkg.isEmpty()) return false;
+                  if (CHATGPT_PACKAGE.equals(pkg) || "com.android.systemui".equals(pkg) || "android".equals(pkg)) {
+                      return true;
+                  }
+                  String p = pkg.toLowerCase(Locale.US);
+                  return p.contains("openai") || p.contains("assistant") || p.contains("systemui");
+              }
+
+              private void collectStrings(AccessibilityNodeInfo node, List<String> out, int[] visited) {
+                  if (node == null || visited[0] > 700) return;
+                  visited[0]++;
+                  if (node.isVisibleToUser()) {
+                      addCleanString(out, node.getText());
+                      addCleanString(out, node.getContentDescription());
+                      if (android.os.Build.VERSION.SDK_INT >= 26) addCleanString(out, node.getHintText());
+                  }
+                  int count = node.getChildCount();
+                  for (int i = 0; i < count && visited[0] <= 700; i++) {
+                      AccessibilityNodeInfo child = node.getChild(i);
+                      if (child != null) collectStrings(child, out, visited);
+                  }
+              }
+
+              private void addCleanString(List<String> out, CharSequence value) {
+                  if (value == null) return;
+                  String s = clean(value.toString());
+                  if (s.isEmpty() || isUiChrome(s)) return;
+                  if (!out.contains(s)) out.add(s);
+              }
+
+              private String clean(String raw) {
+                  if (raw == null) return "";
+                  String s = raw.replace('\u00a0', ' ').replaceAll("\\s+", " ").trim();
+                  if (s.length() > 2600) s = s.substring(0, 2600);
+                  return s;
+              }
+
+              private boolean isUiChrome(String text) {
+                  String s = text.toLowerCase(Locale.US).trim();
+                  if (s.isEmpty()) return true;
+                  String[] exact = new String[] {
+                          "chatgpt", "close", "cancel", "stop", "done", "back", "send",
+                          "listening", "thinking", "speaking", "voice", "mute", "unmute",
+                          "camera", "keyboard", "settings", "end", "end voice mode",
+                          "tap to interrupt", "tap to stop", "start voice mode", "temporary",
+                          "microphone", "more options", "drag handle"
+                  };
+                  for (String item : exact) if (s.equals(item)) return true;
+                  if (s.startsWith("double tap to")) return true;
+                  if (s.startsWith("button,")) return true;
+                  if (s.startsWith("image,")) return true;
+                  if (s.matches("\\d{1,2}:\\d{2}")) return true;
+                  return false;
+              }
+
+              private String chooseCandidate(List<String> rootStrings, List<String> eventStrings) {
+                  String best = "";
+                  int bestScore = Integer.MIN_VALUE;
+                  LinkedHashSet<String> all = new LinkedHashSet<>();
+                  all.addAll(eventStrings);
+                  all.addAll(rootStrings);
+
+                  for (String s : all) {
+                      if (TextUtils.isEmpty(s) || isUiChrome(s) || s.length() < 4) continue;
+                      int score = Math.min(s.length(), 500);
+                      if (eventStrings.contains(s)) score += 1000;
+                      if (!previousSnapshot.contains(s)) score += 700;
+                      if (!lastDisplayed.isEmpty()) {
+                          if (s.startsWith(lastDisplayed)) score += 500;
+                          else if (lastDisplayed.startsWith(s)) score += 250;
+                      }
+                      if (s.length() >= 12) score += 100;
+                      if (s.endsWith("?") && s.length() < 180) score -= 180;
+                      if (score > bestScore) {
+                          bestScore = score;
+                          best = s;
+                      }
+                  }
+                  return bestScore < 650 ? "" : best;
+              }
+
+              private void updateDebug(String eventPackage, List<String> packages, List<String> strings) {
+                  StringBuilder sb = new StringBuilder();
+                  sb.append("Event: ").append(eventPackage.isEmpty() ? "(none)" : eventPackage);
+                  sb.append(" | Windows: ");
+                  if (packages.isEmpty()) sb.append("(none)");
+                  else {
+                      for (int i = 0; i < packages.size(); i++) {
+                          if (i > 0) sb.append(", ");
+                          sb.append(packages.get(i));
+                      }
+                  }
+                  sb.append(" | Accessible text items: ").append(strings.size());
+                  if (!strings.isEmpty()) {
+                      sb.append(" | Sample: ");
+                      int max = Math.min(3, strings.size());
+                      for (int i = 0; i < max; i++) {
+                          if (i > 0) sb.append(" / ");
+                          String sample = strings.get(i);
+                          if (sample.length() > 80) sample = sample.substring(0, 80) + "…";
+                          sb.append(sample);
+                      }
+                  }
+                  String debug = sb.toString();
+                  if (debug.length() > 600) debug = debug.substring(0, 600);
+                  prefs().edit().putString(KEY_LAST_WINDOW_DEBUG, debug).apply();
+              }
+
+              private void showOverlay(String text) {
+                  if (windowManager == null) return;
+                  if (overlayView == null) createOverlay();
+                  if (overlayText != null) overlayText.setText(text);
+                  handler.removeCallbacks(hideRunnable);
+                  handler.postDelayed(hideRunnable, 20000L);
+              }
+
+              private void createOverlay() {
+                  LinearLayout panel = new LinearLayout(this);
+                  panel.setOrientation(LinearLayout.VERTICAL);
+                  panel.setPadding(dp(18), dp(12), dp(14), dp(14));
+
+                  GradientDrawable background = new GradientDrawable();
+                  background.setColor(Color.argb(238, 28, 28, 30));
+                  background.setCornerRadius(dp(22));
+                  panel.setBackground(background);
+                  panel.setElevation(dp(10));
+
+                  LinearLayout header = new LinearLayout(this);
+                  header.setOrientation(LinearLayout.HORIZONTAL);
+                  header.setGravity(Gravity.CENTER_VERTICAL);
+
+                  TextView title = new TextView(this);
+                  title.setText("ChatGPT");
+                  title.setTextColor(Color.WHITE);
+                  title.setTextSize(14);
+                  title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                  header.addView(title, new LinearLayout.LayoutParams(0,
+                          LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+                  TextView close = new TextView(this);
+                  close.setText("×");
+                  close.setTextColor(Color.LTGRAY);
+                  close.setTextSize(26);
+                  close.setGravity(Gravity.CENTER);
+                  close.setPadding(dp(10), 0, dp(4), 0);
+                  close.setOnClickListener(v -> hideOverlay());
+                  header.addView(close, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.WRAP_CONTENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT));
+                  panel.addView(header);
+
+                  overlayText = new TextView(this);
+                  overlayText.setTextColor(Color.WHITE);
+                  overlayText.setTextSize(18);
+                  overlayText.setLineSpacing(0f, 1.08f);
+                  overlayText.setMaxLines(9);
+                  overlayText.setEllipsize(TextUtils.TruncateAt.END);
+                  overlayText.setPadding(0, dp(4), 0, 0);
+                  panel.addView(overlayText, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT));
+
+                  Rect bounds = windowManager.getCurrentWindowMetrics().getBounds();
+                  int width = Math.max(dp(220), bounds.width() - dp(24));
+                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                          width,
+                          WindowManager.LayoutParams.WRAP_CONTENT,
+                          WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                                  WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
+                                  WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                          PixelFormat.TRANSLUCENT);
+                  params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                  params.y = dp(54);
+
+                  try {
+                      windowManager.addView(panel, params);
+                      overlayView = panel;
+                  } catch (Throwable ignored) {
+                      overlayView = null;
+                      overlayText = null;
+                  }
+              }
+
+              private void hideOverlay() {
+                  handler.removeCallbacks(hideRunnable);
+                  if (windowManager != null && overlayView != null) {
+                      try { windowManager.removeView(overlayView); } catch (Throwable ignored) {}
+                  }
+                  overlayView = null;
+                  overlayText = null;
+              }
+
+              private int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+
+              @Override public void onInterrupt() {
+                  hideOverlay();
+              }
+
+              @Override public void onDestroy() {
+                  handler.removeCallbacksAndMessages(null);
+                  hideOverlay();
+                  super.onDestroy();
+              }
+          }
+          JAVA
+
+          cat > app/src/main/res/xml/accessibility_service_config.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/accessibility_description"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewTextChanged|typeWindowsChanged|typeViewFocused"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:notificationTimeout="25"
+              android:canRetrieveWindowContent="true"
+              android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows" />
+          XML
+
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          # Keep the v1.3 accessibility selection fix.
-          p = Path('app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java')
-          s = p.read_text()
-          old = 'if (label.contains("selected") || label.contains("on") || label.contains("active")) return true;'
-          new = 'if (label.matches(".*\\\\b(selected|active|enabled|on)\\\\b.*")) return true;'
-          if old in s:
-              s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          # Keep the v1.3 WakeListener field-order compile fix, then force the wake
-          # phrase through the original Side-button-style assistant key path.
+          # Keep the v1.3 WakeListener field-order fix and always use the original
+          # Side-button-style assistant key path.
           p = Path('app/src/main/java/com/example/heychatgptassist/WakeListenerService.java')
           s = p.read_text()
           anchor = '    private Intent recognizerIntent;\n    private final Handler handler = new Handler(Looper.getMainLooper());'
@@ -65,14 +432,13 @@ jobs:
               raise SystemExit('triggerAssistant block not found')
           p.write_text(s)
 
-          # v1.4 UI: popup behavior always wins. Automatic Temporary mode is
-          # disabled because ChatGPT exposes Temporary only in its main chat UI.
+          # v1.5 UI: keep popup behavior and expose assistant-window diagnostics.
           p = Path('app/src/main/java/com/example/heychatgptassist/MainActivity.java')
           s = p.read_text()
-          s = s.replace('Hey ChatGPT Assist v1.3', 'Hey ChatGPT Assist v1.4')
+          s = s.replace('Hey ChatGPT Assist v1.3', 'Hey ChatGPT Assist v1.5')
           s = s.replace(
               'Always-listening assistant with smoother microphone handling, optional response text, and an experimental Temporary Voice mode that keeps finished Voice chats out of normal history.',
-              'Always-listening assistant with smoother microphone handling and optional Siri-style response text. Wake-phrase activation always keeps the original Side-button-style ChatGPT assistant popup.')
+              'Always-listening assistant with smoother microphone handling and Siri-style response text diagnostics. Wake activation keeps the original Side-button-style ChatGPT assistant popup.')
 
           init_anchor = '        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);\n'
           if init_anchor not in s:
@@ -81,36 +447,50 @@ jobs:
               '        prefs().edit().putBoolean(KEY_TEMPORARY_VOICE_ENABLED, false).apply();\n', 1)
 
           s = s.replace(
+              'When ChatGPT exposes its live response text through Android Accessibility, the companion can mirror it into a small panel. The Accessibility service is restricted to the ChatGPT app.',
+              'v1.5 checks ChatGPT and Android assistant/system windows only during a recent wake session. If the popup exposes response text to Accessibility, it is mirrored into the small Siri-style panel. The helper also records a short window diagnostic so we can see what your S22 exposes.')
+
+          s = s.replace(
               'When enabled, saying the wake phrase opens ChatGPT, starts a fresh Temporary chat, and then starts Voice. It uses the same Accessibility companion. Voice is not started unless the helper reaches the Temporary control first. This mode opens the ChatGPT app rather than the small Android assistant popup because ChatGPT does not expose a supported Temporary-mode flag for that popup.',
-              'Automatic Temporary Chat is disabled in this build so the wake phrase never opens the full ChatGPT app. ChatGPT currently exposes its Temporary control in the main chat UI, not as a supported flag for the small Android assistant popup. Use ChatGPT Temporary manually when you specifically need a conversation kept out of history.')
+              'Automatic Temporary Chat is disabled so the wake phrase always keeps the small assistant popup. Temporary Chat still needs to be started manually in the normal ChatGPT app.')
 
           old_line = '        temporaryVoiceToggle.setText("Always use Temporary Chat for wake-phrase Voice");'
-          if old_line not in s:
-              raise SystemExit('Temporary toggle label not found')
-          s = s.replace(old_line,
-              '        temporaryVoiceToggle.setText("Automatic Temporary Chat unavailable with assistant popup");', 1)
-
+          if old_line in s:
+              s = s.replace(old_line,
+                  '        temporaryVoiceToggle.setText("Automatic Temporary Chat unavailable with assistant popup");', 1)
           old_checked = '        temporaryVoiceToggle.setChecked(prefs().getBoolean(KEY_TEMPORARY_VOICE_ENABLED, false));'
-          if old_checked not in s:
-              raise SystemExit('Temporary toggle checked line not found')
-          s = s.replace(old_checked,
-              '        temporaryVoiceToggle.setChecked(false);\n        temporaryVoiceToggle.setEnabled(false);', 1)
-
+          if old_checked in s:
+              s = s.replace(old_checked,
+                  '        temporaryVoiceToggle.setChecked(false);\n        temporaryVoiceToggle.setEnabled(false);', 1)
           listener_pattern = re.compile(
               r'\n        temporaryVoiceToggle\.setOnCheckedChangeListener\(\(buttonView, checked\) -> \{\n'
               r'            prefs\(\)\.edit\(\)\.putBoolean\(KEY_TEMPORARY_VOICE_ENABLED, checked\)\.apply\(\);\n'
               r'            updateTemporaryVoiceStatus\(\);\n'
               r'        \}\);')
-          s, count = listener_pattern.subn('', s, count=1)
-          if count != 1:
-              raise SystemExit('Temporary toggle listener block not found')
+          s = listener_pattern.sub('', s, count=1)
 
           s = s.replace(
               'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. That same service handles both response-text mirroring and Temporary Voice automation.',
-              'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. In v1.4 it is used for response-text mirroring; wake activation itself stays on the original assistant popup path.')
+              'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. v1.5 listens to accessibility events from other apps too, but ignores them unless a wake-triggered assistant session is active.')
           s = s.replace(
               'Normal mode keeps the side-button-style Android assistant behavior. Temporary Voice is separate and only takes over the wake action while its toggle is enabled.',
               'Wake-phrase activation always keeps the side-button-style Android assistant popup. It will not launch the full ChatGPT app automatically.')
+
+          old_status = '''        if (!last.isEmpty()) {
+              String preview = last.length() > 120 ? last.substring(0, 120) + "…" : last;
+              text += "\\nLast captured: " + preview;
+          }
+          companionStatus.setText(text);'''
+          new_status = '''        if (!last.isEmpty()) {
+              String preview = last.length() > 120 ? last.substring(0, 120) + "…" : last;
+              text += "\\nLast captured: " + preview;
+          }
+          String debug = prefs().getString(ChatGPTTextAccessibilityService.KEY_LAST_WINDOW_DEBUG, "");
+          if (!debug.isEmpty()) text += "\\nAssistant capture debug: " + debug;
+          companionStatus.setText(text);'''
+          if old_status not in s:
+              raise SystemExit('Companion status block not found')
+          s = s.replace(old_status, new_status, 1)
           p.write_text(s)
 
           # Version bump.
@@ -118,8 +498,8 @@ jobs:
           s = p.read_text()
           if 'versionCode 13' not in s or 'versionName "1.3"' not in s:
               raise SystemExit('Expected v1.3 version fields not found')
-          s = s.replace('versionCode 13', 'versionCode 14', 1)
-          s = s.replace('versionName "1.3"', 'versionName "1.4"', 1)
+          s = s.replace('versionCode 13', 'versionCode 15', 1)
+          s = s.replace('versionName "1.3"', 'versionName "1.5"', 1)
           p.write_text(s)
           PY
 
@@ -146,7 +526,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HeyChatGPTAssist-v1.4-apk
+          name: HeyChatGPTAssist-v1.5-apk
           path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
