@@ -17,10 +17,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Prepare safer Temporary selection check
+      - name: Prepare v1.3 Temporary Voice fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java')
           s = p.read_text()
           old = 'if (label.contains("selected") || label.contains("on") || label.contains("active")) return true;'
@@ -28,6 +29,24 @@ jobs:
           if old not in s:
               raise SystemExit('Temporary selection line not found')
           p.write_text(s.replace(old, new))
+
+          p = Path('app/src/main/java/com/example/heychatgptassist/WakeListenerService.java')
+          s = p.read_text()
+          anchor = '    private Intent recognizerIntent;\n    private final Handler handler = new Handler(Looper.getMainLooper());'
+          replacement = ('    private Intent recognizerIntent;\n'
+                         '    private boolean stopping = false;\n'
+                         '    private boolean pausedForAssistant = false;\n'
+                         '    private final Handler handler = new Handler(Looper.getMainLooper());')
+          if anchor not in s:
+              raise SystemExit('Wake listener field anchor not found')
+          s = s.replace(anchor, replacement, 1)
+          duplicate = ('\n    private boolean stopping = false;\n'
+                       '    private boolean pausedForAssistant = false;\n'
+                       '    private boolean forceSystemRecognizer = false;')
+          if duplicate not in s:
+              raise SystemExit('Wake listener duplicate field block not found')
+          s = s.replace(duplicate, '\n    private boolean forceSystemRecognizer = false;', 1)
+          p.write_text(s)
           PY
 
       - name: Set up Java 17
