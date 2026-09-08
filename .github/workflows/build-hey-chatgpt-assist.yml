@@ -21,6 +21,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           # Keep the v1.3 accessibility selection fix.
           p = Path('app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java')
@@ -32,7 +33,7 @@ jobs:
           p.write_text(s)
 
           # Keep the v1.3 WakeListener field-order compile fix, then force the wake
-          # phrase back through the original Side-button-style assistant key path.
+          # phrase through the original Side-button-style assistant key path.
           p = Path('app/src/main/java/com/example/heychatgptassist/WakeListenerService.java')
           s = p.read_text()
           anchor = '    private Intent recognizerIntent;\n    private final Handler handler = new Handler(Looper.getMainLooper());'
@@ -48,18 +49,20 @@ jobs:
           if duplicate in s:
               s = s.replace(duplicate, '\n    private boolean forceSystemRecognizer = false;', 1)
 
-          old_trigger = '''    private void triggerAssistant() {
-              if (pausedForAssistant || stopping) return;
-              if (getTemporaryVoiceEnabled()) triggerTemporaryVoice();
-              else triggerNormalAssistant();
-          }'''
-          new_trigger = '''    private void triggerAssistant() {
-              if (pausedForAssistant || stopping) return;
-              triggerNormalAssistant();
-          }'''
-          if old_trigger not in s:
+          trigger_pattern = re.compile(
+              r'    private void triggerAssistant\(\) \{\n'
+              r'        if \(pausedForAssistant \|\| stopping\) return;\n'
+              r'        if \(getTemporaryVoiceEnabled\(\)\) triggerTemporaryVoice\(\);\n'
+              r'        else triggerNormalAssistant\(\);\n'
+              r'    \}')
+          trigger_replacement = (
+              '    private void triggerAssistant() {\n'
+              '        if (pausedForAssistant || stopping) return;\n'
+              '        triggerNormalAssistant();\n'
+              '    }')
+          s, count = trigger_pattern.subn(trigger_replacement, s, count=1)
+          if count != 1:
               raise SystemExit('triggerAssistant block not found')
-          s = s.replace(old_trigger, new_trigger, 1)
           p.write_text(s)
 
           # v1.4 UI: popup behavior always wins. Automatic Temporary mode is
@@ -81,22 +84,26 @@ jobs:
               'When enabled, saying the wake phrase opens ChatGPT, starts a fresh Temporary chat, and then starts Voice. It uses the same Accessibility companion. Voice is not started unless the helper reaches the Temporary control first. This mode opens the ChatGPT app rather than the small Android assistant popup because ChatGPT does not expose a supported Temporary-mode flag for that popup.',
               'Automatic Temporary Chat is disabled in this build so the wake phrase never opens the full ChatGPT app. ChatGPT currently exposes its Temporary control in the main chat UI, not as a supported flag for the small Android assistant popup. Use ChatGPT Temporary manually when you specifically need a conversation kept out of history.')
 
-          old_toggle = '''        temporaryVoiceToggle = new CheckBox(this);
-          temporaryVoiceToggle.setText("Always use Temporary Chat for wake-phrase Voice");
-          temporaryVoiceToggle.setChecked(prefs().getBoolean(KEY_TEMPORARY_VOICE_ENABLED, false));
-          temporaryVoiceToggle.setOnCheckedChangeListener((buttonView, checked) -> {
-              prefs().edit().putBoolean(KEY_TEMPORARY_VOICE_ENABLED, checked).apply();
-              updateTemporaryVoiceStatus();
-          });
-          root.addView(temporaryVoiceToggle);'''
-          new_toggle = '''        temporaryVoiceToggle = new CheckBox(this);
-          temporaryVoiceToggle.setText("Automatic Temporary Chat unavailable with assistant popup");
-          temporaryVoiceToggle.setChecked(false);
-          temporaryVoiceToggle.setEnabled(false);
-          root.addView(temporaryVoiceToggle);'''
-          if old_toggle not in s:
-              raise SystemExit('Temporary toggle block not found')
-          s = s.replace(old_toggle, new_toggle, 1)
+          old_line = '        temporaryVoiceToggle.setText("Always use Temporary Chat for wake-phrase Voice");'
+          if old_line not in s:
+              raise SystemExit('Temporary toggle label not found')
+          s = s.replace(old_line,
+              '        temporaryVoiceToggle.setText("Automatic Temporary Chat unavailable with assistant popup");', 1)
+
+          old_checked = '        temporaryVoiceToggle.setChecked(prefs().getBoolean(KEY_TEMPORARY_VOICE_ENABLED, false));'
+          if old_checked not in s:
+              raise SystemExit('Temporary toggle checked line not found')
+          s = s.replace(old_checked,
+              '        temporaryVoiceToggle.setChecked(false);\n        temporaryVoiceToggle.setEnabled(false);', 1)
+
+          listener_pattern = re.compile(
+              r'\n        temporaryVoiceToggle\.setOnCheckedChangeListener\(\(buttonView, checked\) -> \{\n'
+              r'            prefs\(\)\.edit\(\)\.putBoolean\(KEY_TEMPORARY_VOICE_ENABLED, checked\)\.apply\(\);\n'
+              r'            updateTemporaryVoiceStatus\(\);\n'
+              r'        \}\);')
+          s, count = listener_pattern.subn('', s, count=1)
+          if count != 1:
+              raise SystemExit('Temporary toggle listener block not found')
 
           s = s.replace(
               'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. That same service handles both response-text mirroring and Temporary Voice automation.',
