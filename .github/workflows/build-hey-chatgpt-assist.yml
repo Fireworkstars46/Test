@@ -17,19 +17,22 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Prepare v1.3 Temporary Voice fixes
+      - name: Prepare v1.4 popup-first build
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          # Keep the v1.3 accessibility selection fix.
           p = Path('app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilityService.java')
           s = p.read_text()
           old = 'if (label.contains("selected") || label.contains("on") || label.contains("active")) return true;'
           new = 'if (label.matches(".*\\\\b(selected|active|enabled|on)\\\\b.*")) return true;'
-          if old not in s:
-              raise SystemExit('Temporary selection line not found')
-          p.write_text(s.replace(old, new))
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s)
 
+          # Keep the v1.3 WakeListener field-order compile fix, then force the wake
+          # phrase back through the original Side-button-style assistant key path.
           p = Path('app/src/main/java/com/example/heychatgptassist/WakeListenerService.java')
           s = p.read_text()
           anchor = '    private Intent recognizerIntent;\n    private final Handler handler = new Handler(Looper.getMainLooper());'
@@ -37,15 +40,79 @@ jobs:
                          '    private boolean stopping = false;\n'
                          '    private boolean pausedForAssistant = false;\n'
                          '    private final Handler handler = new Handler(Looper.getMainLooper());')
-          if anchor not in s:
-              raise SystemExit('Wake listener field anchor not found')
-          s = s.replace(anchor, replacement, 1)
+          if anchor in s:
+              s = s.replace(anchor, replacement, 1)
           duplicate = ('\n    private boolean stopping = false;\n'
                        '    private boolean pausedForAssistant = false;\n'
                        '    private boolean forceSystemRecognizer = false;')
-          if duplicate not in s:
-              raise SystemExit('Wake listener duplicate field block not found')
-          s = s.replace(duplicate, '\n    private boolean forceSystemRecognizer = false;', 1)
+          if duplicate in s:
+              s = s.replace(duplicate, '\n    private boolean forceSystemRecognizer = false;', 1)
+
+          old_trigger = '''    private void triggerAssistant() {
+              if (pausedForAssistant || stopping) return;
+              if (getTemporaryVoiceEnabled()) triggerTemporaryVoice();
+              else triggerNormalAssistant();
+          }'''
+          new_trigger = '''    private void triggerAssistant() {
+              if (pausedForAssistant || stopping) return;
+              triggerNormalAssistant();
+          }'''
+          if old_trigger not in s:
+              raise SystemExit('triggerAssistant block not found')
+          s = s.replace(old_trigger, new_trigger, 1)
+          p.write_text(s)
+
+          # v1.4 UI: popup behavior always wins. Automatic Temporary mode is
+          # disabled because ChatGPT exposes Temporary only in its main chat UI.
+          p = Path('app/src/main/java/com/example/heychatgptassist/MainActivity.java')
+          s = p.read_text()
+          s = s.replace('Hey ChatGPT Assist v1.3', 'Hey ChatGPT Assist v1.4')
+          s = s.replace(
+              'Always-listening assistant with smoother microphone handling, optional response text, and an experimental Temporary Voice mode that keeps finished Voice chats out of normal history.',
+              'Always-listening assistant with smoother microphone handling and optional Siri-style response text. Wake-phrase activation always keeps the original Side-button-style ChatGPT assistant popup.')
+
+          init_anchor = '        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);\n'
+          if init_anchor not in s:
+              raise SystemExit('MainActivity init anchor not found')
+          s = s.replace(init_anchor, init_anchor +
+              '        prefs().edit().putBoolean(KEY_TEMPORARY_VOICE_ENABLED, false).apply();\n', 1)
+
+          s = s.replace(
+              'When enabled, saying the wake phrase opens ChatGPT, starts a fresh Temporary chat, and then starts Voice. It uses the same Accessibility companion. Voice is not started unless the helper reaches the Temporary control first. This mode opens the ChatGPT app rather than the small Android assistant popup because ChatGPT does not expose a supported Temporary-mode flag for that popup.',
+              'Automatic Temporary Chat is disabled in this build so the wake phrase never opens the full ChatGPT app. ChatGPT currently exposes its Temporary control in the main chat UI, not as a supported flag for the small Android assistant popup. Use ChatGPT Temporary manually when you specifically need a conversation kept out of history.')
+
+          old_toggle = '''        temporaryVoiceToggle = new CheckBox(this);
+          temporaryVoiceToggle.setText("Always use Temporary Chat for wake-phrase Voice");
+          temporaryVoiceToggle.setChecked(prefs().getBoolean(KEY_TEMPORARY_VOICE_ENABLED, false));
+          temporaryVoiceToggle.setOnCheckedChangeListener((buttonView, checked) -> {
+              prefs().edit().putBoolean(KEY_TEMPORARY_VOICE_ENABLED, checked).apply();
+              updateTemporaryVoiceStatus();
+          });
+          root.addView(temporaryVoiceToggle);'''
+          new_toggle = '''        temporaryVoiceToggle = new CheckBox(this);
+          temporaryVoiceToggle.setText("Automatic Temporary Chat unavailable with assistant popup");
+          temporaryVoiceToggle.setChecked(false);
+          temporaryVoiceToggle.setEnabled(false);
+          root.addView(temporaryVoiceToggle);'''
+          if old_toggle not in s:
+              raise SystemExit('Temporary toggle block not found')
+          s = s.replace(old_toggle, new_toggle, 1)
+
+          s = s.replace(
+              'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. That same service handles both response-text mirroring and Temporary Voice automation.',
+              'One-time setup: turn on ‘Hey ChatGPT Assist response text’ in Accessibility. In v1.4 it is used for response-text mirroring; wake activation itself stays on the original assistant popup path.')
+          s = s.replace(
+              'Normal mode keeps the side-button-style Android assistant behavior. Temporary Voice is separate and only takes over the wake action while its toggle is enabled.',
+              'Wake-phrase activation always keeps the side-button-style Android assistant popup. It will not launch the full ChatGPT app automatically.')
+          p.write_text(s)
+
+          # Version bump.
+          p = Path('app/build.gradle')
+          s = p.read_text()
+          if 'versionCode 13' not in s or 'versionName "1.3"' not in s:
+              raise SystemExit('Expected v1.3 version fields not found')
+          s = s.replace('versionCode 13', 'versionCode 14', 1)
+          s = s.replace('versionName "1.3"', 'versionName "1.4"', 1)
           p.write_text(s)
           PY
 
@@ -72,7 +139,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HeyChatGPTAssist-v1.3-apk
+          name: HeyChatGPTAssist-v1.4-apk
           path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
