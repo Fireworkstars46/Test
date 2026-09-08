@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hey ChatGPT Assist</string>
-    <string name="accessibility_description">Works only with the ChatGPT app to mirror accessible response text and, when Temporary Voice is enabled, press ChatGPT&apos;s Temporary and Voice controls. It does not read other apps.</string>
+    <string name="accessibility_description">Works only with the ChatGPT app to mirror accessible response text and to press Temporary and Voice controls when Temporary Voice is enabled. It does not read other apps.</string>
 </resources>
