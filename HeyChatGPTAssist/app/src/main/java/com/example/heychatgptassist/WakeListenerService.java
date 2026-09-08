@@ -13,31 +13,78 @@ public class WakeListenerService extends Service implements RecognitionListener 
 
     public static final String KEY_LISTENER_STATUS = "listener_status";
     public static final String KEY_LAST_HEARD = "last_heard";
+    public static final String ACTION_TEMP_VOICE_STARTED =
+            "com.example.heychatgptassist.TEMP_VOICE_STARTED";
+    public static final String ACTION_TEMP_VOICE_FINISHED =
+            "com.example.heychatgptassist.TEMP_VOICE_FINISHED";
 
     private SpeechRecognizer recognizer;
     private Intent recognizerIntent;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable startRunnable = this::startListeningNow;
     private final Runnable rearmRunnable = this::rearmAfterTrigger;
+    private final Runnable tempSetupTimeoutRunnable = () -> {
+        if (!stopping && pausedForAssistant) {
+            setStatus("Temporary Voice setup timed out — re-arming listener");
+            rearmAfterTrigger();
+        }
+    };
+    private final Runnable tempMaxSessionRunnable = () -> {
+        if (!stopping && pausedForAssistant) {
+            setStatus("Temporary Voice safety timeout — re-arming listener");
+            rearmAfterTrigger();
+        }
+    };
+
     private boolean stopping = false;
     private boolean pausedForAssistant = false;
     private boolean forceSystemRecognizer = false;
     private boolean usingOnDeviceRecognizer = false;
+    private boolean tempReceiverRegistered = false;
 
-    // Keep routine callback traffic out of SharedPreferences as much as possible.
-    // This matters when a game is running and the recognizer is producing lots of
-    // partial/noise updates in the background.
     private String lastStatusWritten = "";
     private String lastHeardWritten = "";
     private long lastHeardWriteUptime = 0L;
+
+    private final BroadcastReceiver tempVoiceReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (intent == null) return;
+            String action = intent.getAction();
+            if (ACTION_TEMP_VOICE_STARTED.equals(action)) {
+                handler.removeCallbacks(tempSetupTimeoutRunnable);
+                handler.removeCallbacks(tempMaxSessionRunnable);
+                setStatus("Temporary Voice active — wake listener paused");
+                handler.postDelayed(tempMaxSessionRunnable, 60L * 60L * 1000L);
+            } else if (ACTION_TEMP_VOICE_FINISHED.equals(action)) {
+                handler.removeCallbacks(tempSetupTimeoutRunnable);
+                handler.removeCallbacks(tempMaxSessionRunnable);
+                setStatus("Temporary Voice ended — re-arming listener");
+                rearmAfterTrigger();
+            }
+        }
+    };
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
         startForeground(NOTIFICATION_ID, notification());
+        registerTempVoiceReceiver();
         migrateSmoothDefaults();
         setupRecognizer();
+    }
+
+    private void registerTempVoiceReceiver() {
+        if (tempReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ACTION_TEMP_VOICE_STARTED);
+        filter.addAction(ACTION_TEMP_VOICE_FINISHED);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(tempVoiceReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(tempVoiceReceiver, filter);
+        }
+        tempReceiverRegistered = true;
     }
 
     @Override
@@ -46,6 +93,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
         pausedForAssistant = false;
         handler.removeCallbacks(rearmRunnable);
         handler.removeCallbacks(startRunnable);
+        handler.removeCallbacks(tempSetupTimeoutRunnable);
+        handler.removeCallbacks(tempMaxSessionRunnable);
         migrateSmoothDefaults();
         try { setupRecognizer(); } catch (Throwable ignored) {}
         setStatus("Always listening for ‘" + getWakePhrase() + "’");
@@ -56,19 +105,11 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private void migrateSmoothDefaults() {
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
         if (prefs.getBoolean(KEY_SMOOTH_MIGRATED, false)) return;
-
         SharedPreferences.Editor editor = prefs.edit();
-
-        // v1.1 used 3.5s / 1.8s silence values. On Samsung that can make the
-        // speech session close/reopen often, which repeatedly animates the green
-        // microphone privacy indicator and can briefly disturb an immersive game.
-        // Only migrate values that are still exactly the old defaults; any value
-        // the user already customized is left untouched.
         int complete = prefs.getInt(MainActivity.KEY_COMPLETE_SILENCE_MS, 3500);
         int possible = prefs.getInt(MainActivity.KEY_POSSIBLY_COMPLETE_SILENCE_MS, 1800);
         if (complete == 3500) editor.putInt(MainActivity.KEY_COMPLETE_SILENCE_MS, 60000);
         if (possible == 1800) editor.putInt(MainActivity.KEY_POSSIBLY_COMPLETE_SILENCE_MS, 30000);
-
         editor.putBoolean(KEY_SMOOTH_MIGRATED, true).apply();
     }
 
@@ -78,15 +119,20 @@ public class WakeListenerService extends Service implements RecognitionListener 
         return Math.max(0, Math.min(maxValue, value));
     }
 
+    private SharedPreferences prefs() {
+        return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+    }
+
     private String getWakePhrase() {
-        return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .getString(MainActivity.KEY_WAKE_PHRASE, MainActivity.DEFAULT_WAKE_PHRASE)
-                .trim();
+        return prefs().getString(MainActivity.KEY_WAKE_PHRASE, MainActivity.DEFAULT_WAKE_PHRASE).trim();
     }
 
     private int getAssistKeyCode() {
-        return getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .getInt(MainActivity.KEY_ASSIST_KEYCODE, MainActivity.DEFAULT_ASSIST_KEYCODE);
+        return prefs().getInt(MainActivity.KEY_ASSIST_KEYCODE, MainActivity.DEFAULT_ASSIST_KEYCODE);
+    }
+
+    private boolean getTemporaryVoiceEnabled() {
+        return prefs().getBoolean(MainActivity.KEY_TEMPORARY_VOICE_ENABLED, false);
     }
 
     private int getTriggerDelayMs() {
@@ -146,7 +192,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
 
     private SpeechRecognizer createBestRecognizer() {
         usingOnDeviceRecognizer = false;
-
         if (!forceSystemRecognizer && Build.VERSION.SDK_INT >= 31) {
             try {
                 if (SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
@@ -158,7 +203,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 usingOnDeviceRecognizer = false;
             }
         }
-
         return SpeechRecognizer.createSpeechRecognizer(this);
     }
 
@@ -168,10 +212,8 @@ public class WakeListenerService extends Service implements RecognitionListener 
             try { recognizer.destroy(); } catch (Throwable ignored) {}
             recognizer = null;
         }
-
         recognizer = createBestRecognizer();
         recognizer.setRecognitionListener(this);
-
         recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -184,10 +226,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
                 (long) getPossiblyCompleteSilenceMs());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
                 (long) getMinSpeechMs());
-
-        // Android 13+ recognizers may support segmented sessions. When supported,
-        // this lets one recognition session stay alive longer instead of repeatedly
-        // releasing/reacquiring the microphone every few seconds.
         if (Build.VERSION.SDK_INT >= 33) {
             recognizerIntent.putExtra(
                     RecognizerIntent.EXTRA_SEGMENTED_SESSION,
@@ -233,14 +271,11 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private void rememberHeard(ArrayList<String> results) {
         String heard = firstResult(results);
         if (heard.isEmpty() || heard.equals(lastHeardWritten)) return;
-
         long now = SystemClock.uptimeMillis();
         if (now - lastHeardWriteUptime < 750L) return;
-
         lastHeardWriteUptime = now;
         lastHeardWritten = heard;
-        getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .edit().putString(KEY_LAST_HEARD, heard).apply();
+        prefs().edit().putString(KEY_LAST_HEARD, heard).apply();
     }
 
     private void handleRecognitionBundle(Bundle bundle, boolean restartWhenNoMatch) {
@@ -254,58 +289,83 @@ public class WakeListenerService extends Service implements RecognitionListener 
         }
     }
 
-    private void triggerAssistant() {
-        if (pausedForAssistant || stopping) return;
+    private void beginAssistantPause() {
         pausedForAssistant = true;
-
-        final int keyCode = getAssistKeyCode();
-        final int triggerDelayMs = getTriggerDelayMs();
-        final int rearmDelayMs = getRearmDelayMs();
-
-        setStatus("Activation phrase heard — opening assistant");
-
         handler.removeCallbacks(startRunnable);
         handler.removeCallbacks(rearmRunnable);
-
         if (recognizer != null) {
             try { recognizer.cancel(); } catch (Throwable ignored) {}
             try { recognizer.destroy(); } catch (Throwable ignored) {}
             recognizer = null;
         }
+    }
 
-        getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .edit()
+    private void triggerAssistant() {
+        if (pausedForAssistant || stopping) return;
+        if (getTemporaryVoiceEnabled()) triggerTemporaryVoice();
+        else triggerNormalAssistant();
+    }
+
+    private void triggerNormalAssistant() {
+        beginAssistantPause();
+        final int keyCode = getAssistKeyCode();
+        final int triggerDelayMs = getTriggerDelayMs();
+        final int rearmDelayMs = getRearmDelayMs();
+        setStatus("Activation phrase heard — opening assistant");
+        prefs().edit()
                 .putLong(ChatGPTTextAccessibilityService.KEY_LAST_ASSIST_TRIGGER_MS,
                         System.currentTimeMillis())
                 .apply();
-
         new Thread(() -> {
             if (triggerDelayMs > 0) {
                 try { Thread.sleep(triggerDelayMs); } catch (InterruptedException ignored) {}
             }
-
             ShizukuBridge.Result result = ShizukuBridge.sendKeyEvent(keyCode);
-            handler.post(() -> {
-                if (result.success) {
-                    setStatus("Assistant opened — re-arming listener");
-                } else {
-                    setStatus("Wake phrase matched, but " + result.message + " — re-arming");
-                }
-            });
+            handler.post(() -> setStatus(result.success
+                    ? "Assistant opened — re-arming listener"
+                    : "Wake phrase matched, but " + result.message + " — re-arming"));
         }, "shizuku-wake-trigger").start();
-
         if (rearmDelayMs <= 0) handler.post(rearmRunnable);
         else handler.postDelayed(rearmRunnable, rearmDelayMs);
     }
 
+    private void triggerTemporaryVoice() {
+        beginAssistantPause();
+        final int triggerDelayMs = getTriggerDelayMs();
+        final long requestTime = System.currentTimeMillis();
+        setStatus("Activation phrase heard — preparing Temporary Voice");
+        prefs().edit()
+                .putLong(ChatGPTTextAccessibilityService.KEY_TEMP_REQUEST_MS, requestTime)
+                .putString(ChatGPTTextAccessibilityService.KEY_TEMP_AUTOMATION_STATUS,
+                        "Opening ChatGPT for Temporary Voice…")
+                .apply();
+        handler.removeCallbacks(tempSetupTimeoutRunnable);
+        handler.postDelayed(tempSetupTimeoutRunnable, 20000L);
+        Runnable launch = () -> {
+            try {
+                Intent open = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+                if (open == null) throw new IllegalStateException("ChatGPT launch intent unavailable");
+                open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(open);
+                setStatus("Temporary Voice: ChatGPT opened — waiting for Temporary mode");
+            } catch (Throwable t) {
+                prefs().edit().putString(ChatGPTTextAccessibilityService.KEY_TEMP_AUTOMATION_STATUS,
+                        "Could not open ChatGPT for Temporary Voice").apply();
+                setStatus("Could not open ChatGPT — re-arming listener");
+                rearmAfterTrigger();
+            }
+        };
+        if (triggerDelayMs <= 0) handler.post(launch);
+        else handler.postDelayed(launch, triggerDelayMs);
+    }
+
     private void rearmAfterTrigger() {
         if (stopping) return;
+        handler.removeCallbacks(tempSetupTimeoutRunnable);
+        handler.removeCallbacks(tempMaxSessionRunnable);
         pausedForAssistant = false;
-        try {
-            setupRecognizer();
-        } catch (Throwable ignored) {
-            recognizer = null;
-        }
+        try { setupRecognizer(); }
+        catch (Throwable ignored) { recognizer = null; }
         setStatus("Always listening — re-armed");
         startListeningSoon(0);
     }
@@ -313,42 +373,32 @@ public class WakeListenerService extends Service implements RecognitionListener 
     private void setStatus(String text) {
         if (text == null || text.equals(lastStatusWritten)) return;
         lastStatusWritten = text;
-        getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .edit().putString(KEY_LISTENER_STATUS, text).apply();
+        prefs().edit().putString(KEY_LISTENER_STATUS, text).apply();
     }
 
     @Override public void onReadyForSpeech(Bundle params) {
         setStatus("Always listening for ‘" + getWakePhrase() + "’");
     }
-
     @Override public void onBeginningOfSpeech() {}
-
     @Override public void onPartialResults(Bundle partialResults) {
         handleRecognitionBundle(partialResults, false);
     }
-
     @Override public void onResults(Bundle results) {
         handleRecognitionBundle(results, true);
     }
-
     @Override public void onSegmentResults(Bundle segmentResults) {
         handleRecognitionBundle(segmentResults, false);
     }
-
     @Override public void onEndOfSegmentedSession() {
         if (!pausedForAssistant && !stopping) startListeningSoon(getRestartDelayMs());
     }
 
     @Override public void onError(int error) {
         if (stopping || pausedForAssistant) return;
-
         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
             setStatus("Microphone permission required");
             return;
         }
-
-        // If the dedicated local recognizer exists but its language pack is not
-        // available, fall back to the normal system recognizer automatically.
         if (usingOnDeviceRecognizer && Build.VERSION.SDK_INT >= 31 &&
                 (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
                         error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)) {
@@ -357,7 +407,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
             startListeningSoon(getBusyRetryDelayMs());
             return;
         }
-
         if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
             if (recognizer != null) {
                 try { recognizer.cancel(); } catch (Throwable ignored) {}
@@ -365,19 +414,16 @@ public class WakeListenerService extends Service implements RecognitionListener 
             startListeningSoon(getBusyRetryDelayMs());
             return;
         }
-
         if (error == SpeechRecognizer.ERROR_CLIENT ||
                 (Build.VERSION.SDK_INT >= 31 && error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED)) {
             try { setupRecognizer(); } catch (Throwable ignored) { recognizer = null; }
             startListeningSoon(getBusyRetryDelayMs());
             return;
         }
-
         if (Build.VERSION.SDK_INT >= 31 && error == SpeechRecognizer.ERROR_TOO_MANY_REQUESTS) {
             startListeningSoon(getRateLimitRetryDelayMs());
             return;
         }
-
         startListeningSoon(getRestartDelayMs());
     }
 
@@ -402,7 +448,6 @@ public class WakeListenerService extends Service implements RecognitionListener 
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(
                 this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
         return new Notification.Builder(this, CHANNEL)
                 .setContentTitle("Hey ChatGPT Assist")
                 .setContentText("Always listening for ‘" + getWakePhrase() + "’")
@@ -425,8 +470,11 @@ public class WakeListenerService extends Service implements RecognitionListener 
             try { recognizer.destroy(); } catch (Throwable ignored) {}
             recognizer = null;
         }
-        getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
-                .edit().putString(KEY_LISTENER_STATUS, "Stopped").apply();
+        if (tempReceiverRegistered) {
+            try { unregisterReceiver(tempVoiceReceiver); } catch (Throwable ignored) {}
+            tempReceiverRegistered = false;
+        }
+        prefs().edit().putString(KEY_LISTENER_STATUS, "Stopped").apply();
         super.onDestroy();
     }
 
