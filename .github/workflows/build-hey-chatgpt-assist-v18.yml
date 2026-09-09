@@ -18,7 +18,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare v1.8 source
-        run: python3 prepare_v18.py
+        run: |
+          python3 prepare_v18.py
+          python3 fix_v18_output.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
