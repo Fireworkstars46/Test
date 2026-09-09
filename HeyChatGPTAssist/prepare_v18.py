@@ -299,7 +299,9 @@ replacement = '''    private void updateCompanionStatus() {
     }
 
     private void updateTemporaryVoiceStatus()'''
-s, count = method_pattern.subn(replacement, s, count=1)
+# Use a function replacement so re.sub does not reinterpret the Java "\\n"
+# escape as a literal newline inside the generated Java string.
+s, count = method_pattern.subn(lambda _m: replacement, s, count=1)
 if count != 1:
     raise SystemExit('updateCompanionStatus method not found')
 
