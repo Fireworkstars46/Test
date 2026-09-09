@@ -2,11 +2,25 @@ from pathlib import Path
 p = Path('app/src/main/java/com/example/heychatgptassist/SiriModeActivity.java')
 s = p.read_text()
 
-# Rebuild the method wholesale because v1.9 inserted the bubble inside panel.
+# Replace ONLY buildUi(). v1.9's startBubbleAnimation() is injected much later
+# in the class, so slicing up to that method would delete the API/listener code.
 start = s.find('    private void buildUi() {')
-end = s.find('    private void startBubbleAnimation() {', start)
-if start < 0 or end < 0:
-    raise SystemExit('v2.0: Siri buildUi boundaries missing')
+if start < 0:
+    raise SystemExit('v2.0: Siri buildUi start missing')
+brace = s.find('{', start)
+depth = 0
+end = None
+for i in range(brace, len(s)):
+    if s[i] == '{':
+        depth += 1
+    elif s[i] == '}':
+        depth -= 1
+        if depth == 0:
+            end = i + 1
+            break
+if end is None:
+    raise SystemExit('v2.0: Siri buildUi closing brace missing')
+
 new_build_ui = r'''    private void buildUi() {
         FrameLayout outer = new FrameLayout(this);
         outer.setPadding(dp(12), dp(20), dp(12), dp(24));
@@ -87,9 +101,7 @@ new_build_ui = r'''    private void buildUi() {
 
         setContentView(outer);
         startBubbleAnimation();
-    }
-
-'''
+    }'''
 s = s[:start] + new_build_ui + s[end:]
 
 # Add a slow rotation to the existing pulse animation.
