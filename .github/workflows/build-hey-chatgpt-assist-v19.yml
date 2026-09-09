@@ -1,0 +1,71 @@
+name: Build Hey ChatGPT Assist v1.9 APK
+
+on:
+  push:
+    branches:
+      - hey-chatgpt-assist-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: HeyChatGPTAssist
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare v1.9 app source
+        run: python3 prepare_v19.py
+
+      - name: Fetch pinned llama.cpp
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git llama.cpp
+          cd llama.cpp
+          git fetch --depth 1 origin 304665fe7ac957df95e3ff8c8c4ffdf92dd6ffa3
+          git checkout 304665fe7ac957df95e3ff8c8c4ffdf92dd6ffa3
+          cd ..
+          python3 prepare_llama_module_v19.py
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK, NDK, and CMake
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.13113456" "cmake;3.22.1"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeyChatGPTAssist-v1.9-apk
+          path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Stage APK signing tools
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" signing-tools/
+          cp -r "$ANDROID_SDK_ROOT/build-tools/35.0.0/lib" signing-tools/
+
+      - name: Upload APK signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apksigner-35-v19
+          path: HeyChatGPTAssist/signing-tools
+          if-no-files-found: error
