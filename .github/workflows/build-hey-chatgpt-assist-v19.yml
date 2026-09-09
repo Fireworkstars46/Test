@@ -21,12 +21,12 @@ jobs:
       - name: Prepare v1.9 app source
         run: python3 prepare_v19.py
 
-      - name: Fetch pinned llama.cpp
+      - name: Fetch compatible pinned llama.cpp
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git llama.cpp
           cd llama.cpp
-          git fetch --depth 1 origin 304665fe7ac957df95e3ff8c8c4ffdf92dd6ffa3
-          git checkout 304665fe7ac957df95e3ff8c8c4ffdf92dd6ffa3
+          git fetch --depth 1 origin c1366056f6cb6607b035e438fb1d10bc8b207364
+          git checkout c1366056f6cb6607b035e438fb1d10bc8b207364
           cd ..
           python3 prepare_llama_module_v19.py
 
