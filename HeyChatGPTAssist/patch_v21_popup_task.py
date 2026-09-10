@@ -7,12 +7,11 @@ p = Path('app/src/main/AndroidManifest.xml')
 s = p.read_text()
 
 def isolate_activity(text, name):
-    pat = rf'(<activity\s+android:name="\\.{name}"[^>]*)(/>)'
+    pat = rf'(<activity\s+android:name="\.{name}"[^>]*)(/>)'
     m = re.search(pat, text, flags=re.S)
     if not m:
         raise SystemExit(f'v2.1: manifest activity {name} missing')
     head = m.group(1)
-    # Drop any previous versions before adding our exact set.
     for attr in [
         'android:taskAffinity',
         'android:noHistory',
