@@ -1,4 +1,4 @@
-name: Build Hey ChatGPT Assist v2.0 APK
+name: Build Hey ChatGPT Assist v2.1 APK
 
 on:
   push:
@@ -36,6 +36,9 @@ jobs:
       - name: Finalize v2.0 source
         run: python3 patch_v20_finalize.py
 
+      - name: Apply v2.1 popup task isolation
+        run: python3 patch_v21_popup_task.py
+
       - name: Fetch compatible pinned llama.cpp
         run: |
           git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git llama.cpp
@@ -68,7 +71,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HeyChatGPTAssist-v2.0-apk
+          name: HeyChatGPTAssist-v2.1-apk
           path: HeyChatGPTAssist/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -81,6 +84,6 @@ jobs:
       - name: Upload APK signing tools
         uses: actions/upload-artifact@v4
         with:
-          name: android-apksigner-35-v20
+          name: android-apksigner-35-v21
           path: HeyChatGPTAssist/signing-tools
           if-no-files-found: error
