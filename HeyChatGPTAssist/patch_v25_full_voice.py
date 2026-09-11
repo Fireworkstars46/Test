@@ -132,8 +132,7 @@ s = s.replace(field_anchor, field_anchor + r'''
     private TextView captionView;
     private String lastCaption = "";''', 1)
 
-new_event = r'''    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
+new_event = r'''    public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event != null) {
             String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
 
