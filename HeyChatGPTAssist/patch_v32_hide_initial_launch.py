@@ -125,6 +125,7 @@ p = Path("app/src/main/java/com/example/heychatgptassist/ChatGPTTextAccessibilit
 s = p.read_text()
 
 for imp in [
+    "import android.os.Build;\n",
     "import android.content.BroadcastReceiver;\n",
     "import android.content.Context;\n",
     "import android.content.IntentFilter;\n",
