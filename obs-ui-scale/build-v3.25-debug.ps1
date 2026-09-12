@@ -74,30 +74,14 @@ Replace-Required @'
 '@ 'keep low-row relaxation across tiny floor recalculations'
 
 # The old latch polled the mouse forever and restored/reapplied constraints on
-# the next drag. That directly caused the "drag gets locked" behavior. Keep only
-# a lightweight state marker; no polling and no automatic restore on drag.
-Replace-Required @'
-        if (latch) {
-            lowRowFloorLatchActive_ = true;
-            lowRowFloorLatchHeight_ = targetHeight;
-            lowRowLatchSeenRelease_ = false;
+# the next drag. Remove that polling call but keep the low-row relaxed-state
+# marker so constraints can be restored when leaving low-row mode.
+$s = $s.Replace(@'
             const int generation = ++lowRowFloorLatchGeneration_;
             PollLowRowFloorLatchForUnlock(generation);
-        } else if (!reached) {
-            lowRowFloorLatchActive_ = true;
-            ReleaseLowRowFloorLatch();
-        }
-'@ @'
-        if (latch) {
-            lowRowFloorLatchActive_ = true;
-            lowRowFloorLatchHeight_ = targetHeight;
-            lowRowLatchSeenRelease_ = false;
+'@, @'
             ++lowRowFloorLatchGeneration_;
-        } else if (!reached) {
-            lowRowFloorLatchActive_ = true;
-            ReleaseLowRowFloorLatch();
-        }
-'@ 'remove low-row mouse polling latch'
+'@)
 
 # 1/2-row floor measurement should remain stable once captured. v3.24's delayed
 # refresh oscillated 71->73->71 while the user was dragging.
