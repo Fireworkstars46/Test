@@ -167,11 +167,22 @@ Replace-Required @'
 
 # When a low-row force latches, immediately restore all child visual policies,
 # keep only the dock maximum latch, and start the next-drag unlock watcher.
-Replace-Required @'
-            lowRowFloorLatchHeight_ = targetHeight;
-            lowRowLatchSeenRelease_ = false;
-            ++lowRowFloorLatchGeneration_;
-'@ @'
+# Patch the latch branch by function scope instead of relying on the exact older
+# comment/body text (v3.25/v3.26 changed that body several times).
+$forceStart = $s.IndexOf('    bool ForceBottomRowHeightNow(int targetHeight, const QString &reason, bool latch)')
+$forceEnd = $s.IndexOf('    void ReassertSceneRowLock()', $forceStart)
+if ($forceStart -lt 0 -or $forceEnd -lt 0) {
+    throw 'v3.32 could not isolate ForceBottomRowHeightNow'
+}
+$forceBlock = $s.Substring($forceStart, $forceEnd - $forceStart)
+$latchStart = $forceBlock.IndexOf('        if (latch) {')
+$latchElse = $forceBlock.IndexOf('        } else if (!reached) {', $latchStart)
+if ($latchStart -lt 0 -or $latchElse -lt 0) {
+    throw 'v3.32 could not isolate low-row latch branch'
+}
+$newLatch = @'
+        if (latch) {
+            lowRowFloorLatchActive_ = true;
             lowRowFloorLatchHeight_ = targetHeight;
             lowRowLatchSeenRelease_ = false;
             const int latchGeneration = ++lowRowFloorLatchGeneration_;
@@ -183,7 +194,11 @@ Replace-Required @'
                 RestoreLowRowDescendantVisualState();
                 PollLowRowFloorLatchForUnlock(latchGeneration);
             });
-'@ 'temporary child compression + dock-only latch'
+'@
+$forceBlock = $forceBlock.Substring(0, $latchStart) +
+              $newLatch.TrimEnd() +
+              $forceBlock.Substring($latchElse)
+$s = $s.Substring(0, $forceStart) + $forceBlock + $s.Substring($forceEnd)
 
 # If the low-row target changes because scale/font geometry changes, do not keep
 # an old exact maximum. Release it first, then the new force can latch the new
