@@ -107,15 +107,12 @@ Replace-Required @'
                             ScheduleManualReleasePerfectRowSnap();
 
                         Q_UNUSED(shrinking);
-                        Q_UNUSED(pitch);
 '@ @'
                         if (sceneRowLockEnabled_ && sceneVisibleRows_ <= 2) {
                             if (shrinking)
                                 RelaxLowRowDescendantsForManualDrag();
                             ScheduleManualReleasePerfectRowSnap();
                         }
-
-                        Q_UNUSED(pitch);
 '@ 'temporarily relax hints during real downward drag'
 
 Replace-Required @'
