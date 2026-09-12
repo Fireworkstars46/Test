@@ -76,7 +76,6 @@ Replace-Required @'
             (suppressManualDockCapture_ || realApplySmoothGuardActive_)) {
             applyPreservedSceneDockHeight_ = targetHeight;
             pendingCalibrationSceneDockHeight_ = targetHeight;
-            applyCalibrationDockHeight_ = targetHeight;
             realApplySmoothExpectedHeight_ = targetHeight;
             savedManualSceneDockHeight_ = targetHeight;
             lastImmediateManualSceneDockHeight_ = targetHeight;
