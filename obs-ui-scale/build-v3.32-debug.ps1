@@ -168,15 +168,10 @@ Replace-Required @'
 # When a low-row force latches, immediately restore all child visual policies,
 # keep only the dock maximum latch, and start the next-drag unlock watcher.
 Replace-Required @'
-        if (latch) {
-            lowRowFloorLatchActive_ = true;
             lowRowFloorLatchHeight_ = targetHeight;
             lowRowLatchSeenRelease_ = false;
             ++lowRowFloorLatchGeneration_;
-        } else if (!reached) {
 '@ @'
-        if (latch) {
-            lowRowFloorLatchActive_ = true;
             lowRowFloorLatchHeight_ = targetHeight;
             lowRowLatchSeenRelease_ = false;
             const int latchGeneration = ++lowRowFloorLatchGeneration_;
@@ -188,7 +183,6 @@ Replace-Required @'
                 RestoreLowRowDescendantVisualState();
                 PollLowRowFloorLatchForUnlock(latchGeneration);
             });
-        } else if (!reached) {
 '@ 'temporary child compression + dock-only latch'
 
 # If the low-row target changes because scale/font geometry changes, do not keep
