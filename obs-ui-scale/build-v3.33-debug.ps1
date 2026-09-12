@@ -18,11 +18,13 @@ $ErrorActionPreference = 'Stop'
 
 $path = 'src/plugin-main.cpp'
 $s = Get-Content $path -Raw
-$s = [regex]::Replace($s, "\r\n", "\n")
+$script:crlf = [string][char]13 + [string][char]10
+$script:lf = [string][char]10
+$s = $s.Replace($script:crlf, $script:lf)
 
 function Replace-Required([string]$old, [string]$new, [string]$label) {
-    $old = [regex]::Replace($old, "\r\n", "\n")
-    $new = [regex]::Replace($new, "\r\n", "\n")
+    $old = $old.Replace($script:crlf, $script:lf)
+    $new = $new.Replace($script:crlf, $script:lf)
     if (-not $script:s.Contains($old)) { throw "v3.33 debug patch pattern not found: $label" }
     $script:s = $script:s.Replace($old, $new)
 }
