@@ -100,14 +100,24 @@ $frontend = @'
 '@
 Replace-Block '    void DebugFrontendEvent(enum obs_frontend_event event)' '    void DebugScheduleApplySnapshots' $frontend 'lightweight frontend debug logging'
 
-$applyDebug = @'
+Replace-Required @'
+    void DebugScheduleApplySnapshots(const QString &prefix)
+    {
+        if (!debugLoggingEnabled_)
+            return;
+        const int delays[] = {300};
+        for (int delay : delays) {
+            QTimer::singleShot(delay, this, [this, prefix, delay]() {
+                DebugSnapshot(QStringLiteral("%1 +%2ms").arg(prefix).arg(delay));
+            });
+        }
+    }
+'@ @'
     void DebugScheduleApplySnapshots(const QString &prefix)
     {
         Q_UNUSED(prefix);
     }
-
-'@
-Replace-Block '    void DebugScheduleApplySnapshots(const QString &prefix)' '    void ApplyScale(double requestedUiPercent' $applyDebug 'disable scheduled Apply snapshots'
+'@ 'disable scheduled Apply snapshots'
 
 $s = $s.Replace('        DebugSnapshot(QStringLiteral("Apply BEFORE"));' + "
 ", '')
