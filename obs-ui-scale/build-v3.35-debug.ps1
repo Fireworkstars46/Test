@@ -600,10 +600,11 @@ $sceneGuard = @'
 Replace-Block '    void RestoreAuthoritativeSceneDockTarget()' '    bool IsManualBottomRowResizeGesture() const' $sceneGuard 'lightweight scene guard'
 
 if (-not $s.Contains('#include <QMouseEvent>')) {
-    if ($s.Contains('#include <QMainWindow>'))
+    if ($s.Contains('#include <QMainWindow>')) {
         $s = $s.Replace('#include <QMainWindow>', '#include <QMainWindow>' + $lf + '#include <QMouseEvent>')
-    else
+    } else {
         throw 'v3.35 QMouseEvent include insertion point missing'
+    }
 }
 
 Replace-Required @'
