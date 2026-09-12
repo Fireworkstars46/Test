@@ -54,7 +54,6 @@ Replace-Required @'
             if (suppressManualDockCapture_ || applyPreservedSceneDockHeight_ > 0) {
                 applyPreservedSceneDockHeight_ = targetHeight;
                 pendingCalibrationSceneDockHeight_ = targetHeight;
-                applyCalibrationDockHeight_ = targetHeight;
             }
         }
 
@@ -98,30 +97,17 @@ $frontend = @'
         DebugWrite(QStringLiteral("FRONTEND EVENT %1 scene='%2'").arg(eventName, DebugSceneName()));
     }
 
+'@
+Replace-Block '    void DebugFrontendEvent(enum obs_frontend_event event)' '    void DebugScheduleApplySnapshots' $frontend 'lightweight frontend debug logging'
+
+$applyDebug = @'
     void DebugScheduleApplySnapshots(const QString &prefix)
     {
         Q_UNUSED(prefix);
     }
 
 '@
-Replace-Block '    void DebugFrontendEvent(enum obs_frontend_event event)' '    void DebugScheduleApplySnapshots' $frontend 'lightweight frontend debug logging'
-
-# The replacement above includes DebugScheduleApplySnapshots already, so remove
-# the old body that follows it.
-$dupStart = $s.IndexOf('    void DebugScheduleApplySnapshots(const QString &prefix)', $s.IndexOf('    void DebugScheduleApplySnapshots(const QString &prefix)') + 1)
-if ($dupStart -ge 0) {
-    $dupEnd = $s.IndexOf('    ', $dupStart + 8)
-    if ($dupEnd -gt $dupStart) {
-        # Find the actual next function boundary by looking for closing brace + blank + indent.
-        $marker = "
-    }
-
-"
-        $close = $s.IndexOf($marker, $dupStart)
-        if ($close -gt $dupStart)
-            $s = $s.Substring(0, $dupStart) + $s.Substring($close + $marker.Length)
-    }
-}
+Replace-Block '    void DebugScheduleApplySnapshots(const QString &prefix)' '    void ApplyScale(double requestedUiPercent' $applyDebug 'disable scheduled Apply snapshots'
 
 $s = $s.Replace('        DebugSnapshot(QStringLiteral("Apply BEFORE"));' + "
 ", '')
@@ -147,10 +133,10 @@ Replace-Required @'
 # DebugWrite normally returns when user logging is disabled. Allow the complete
 # test's private diagnostic flag to bypass that one guard.
 Replace-Required @'
-        if (!debugLoggingEnabled_)
+        if (!debugLoggingEnabled_ || debugLogPath_.isEmpty())
             return;
 '@ @'
-        if (!debugLoggingEnabled_ && !completeTestForceLogging_)
+        if ((!debugLoggingEnabled_ && !completeTestForceLogging_) || debugLogPath_.isEmpty())
             return;
 '@ 'keep test diagnostics alive'
 
