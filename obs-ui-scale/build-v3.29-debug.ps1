@@ -31,46 +31,49 @@ if (-not $s.Contains('#include <QEventLoop>')) {
     $s = $s.Replace('#include <QFileInfo>', "#include <QEventLoop>`n#include <QFileInfo>")
 }
 
-# IMPORTANT: patch ONLY CaptureAndApplySceneRowLock(). The same resizeDocks
-# line also exists under single-line if statements elsewhere; replacing it
-# globally would put a local declaration inside that if and break scope.
-$captureStart = $s.IndexOf('    void CaptureAndApplySceneRowLock()')
-$captureEnd = $s.IndexOf('    void ScheduleSceneRowLockCapture(double uiPercent)', $captureStart)
-if ($captureStart -lt 0 -or $captureEnd -lt 0) {
-    throw 'v3.29 could not isolate CaptureAndApplySceneRowLock'
-}
-$captureBlock = $s.Substring($captureStart, $captureEnd - $captureStart)
-$floorResizeNeedle = '        mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_}, Qt::Vertical);'
-if (-not $captureBlock.Contains($floorResizeNeedle)) {
-    throw 'v3.29 capture floor-resize call missing'
-}
-$floorResizeReplacement = @'
-        int preFloorManualTarget = -1;
-        if (realApplySmoothGuardActive_ && realApplySmoothExpectedHeight_ > 0)
-            preFloorManualTarget = realApplySmoothExpectedHeight_;
-        else if (applyPreservedSceneDockHeight_ > 0)
-            preFloorManualTarget = applyPreservedSceneDockHeight_;
-        else if (savedManualSceneDockHeight_ > 0)
-            preFloorManualTarget = savedManualSceneDockHeight_;
+# During Apply, v3.2 only capped the row's MAXIMUM. Scaling can therefore
+# collapse a tall manual row down to the 1-row minimum before the delayed restore
+# puts it back. Temporarily pin the same-row docks to the preserved Apply target
+# with BOTH min and max. Release restores each dock's exact original min/max.
+Replace-Required @'
+static constexpr const char *PROP_APPLY_OLD_MAX_H = "obsUiScaleApplyOldMaxH";
+'@ @'
+static constexpr const char *PROP_APPLY_OLD_MAX_H = "obsUiScaleApplyOldMaxH";
+static constexpr const char *PROP_APPLY_OLD_MIN_H = "obsUiScaleApplyOldMinH";
+'@ 'temporary Apply pin minimum property'
 
-        const int preFloorPitch = qMax(1, CurrentSceneRowHeight());
-        const bool preserveHigherBeforeFloorResize =
-            sceneVisibleRows_ <= 2 &&
-            preFloorManualTarget > lockedSceneDockHeight_ + preFloorPitch;
+Replace-Required @'
+            if (!dock->property(PROP_APPLY_OLD_MAX_H).isValid())
+                dock->setProperty(PROP_APPLY_OLD_MAX_H, dock->maximumHeight());
 
-        if (!preserveHigherBeforeFloorResize) {
-            mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_},
-                                    Qt::Vertical);
-        } else {
-            DebugWrite(QStringLiteral(
-                "ROW CAPTURE SKIPPED FLOOR COLLAPSE floor=%1 manualTarget=%2 live=%3")
-                           .arg(lockedSceneDockHeight_)
-                           .arg(preFloorManualTarget)
-                           .arg(sceneDock->height()));
-        }
-'@
-$captureBlock = $captureBlock.Replace($floorResizeNeedle, $floorResizeReplacement.TrimEnd())
-$s = $s.Substring(0, $captureStart) + $captureBlock + $s.Substring($captureEnd)
+            dock->setMaximumHeight(qMax(dock->minimumHeight(), ceilingHeight));
+'@ @'
+            if (!dock->property(PROP_APPLY_OLD_MAX_H).isValid())
+                dock->setProperty(PROP_APPLY_OLD_MAX_H, dock->maximumHeight());
+            if (!dock->property(PROP_APPLY_OLD_MIN_H).isValid())
+                dock->setProperty(PROP_APPLY_OLD_MIN_H, dock->minimumHeight());
+
+            // Pin the whole live row at the exact pre-Apply height. This is
+            // temporary and is released after Apply, so normal dragging remains
+            // unrestricted.
+            dock->setMinimumHeight(ceilingHeight);
+            dock->setMaximumHeight(ceilingHeight);
+'@ 'pin Apply row against shrink and expansion'
+
+Replace-Required @'
+            const int oldMax = dock->property(PROP_APPLY_OLD_MAX_H).toInt();
+            dock->setMaximumHeight(oldMax > 0 ? oldMax : QWIDGETSIZE_MAX);
+            dock->setProperty(PROP_APPLY_OLD_MAX_H, QVariant());
+'@ @'
+            const int oldMax = dock->property(PROP_APPLY_OLD_MAX_H).toInt();
+            const int oldMin = dock->property(PROP_APPLY_OLD_MIN_H).isValid()
+                                   ? dock->property(PROP_APPLY_OLD_MIN_H).toInt()
+                                   : 0;
+            dock->setMaximumHeight(oldMax > 0 ? oldMax : QWIDGETSIZE_MAX);
+            dock->setMinimumHeight(qMax(0, oldMin));
+            dock->setProperty(PROP_APPLY_OLD_MAX_H, QVariant());
+            dock->setProperty(PROP_APPLY_OLD_MIN_H, QVariant());
+'@ 'restore exact Apply row minimum and maximum'
 
 # The fully automatic test is allowed to run a tiny nested Qt event loop because
 # it explicitly excludes user input. This lets resizeDocks/layout events settle
