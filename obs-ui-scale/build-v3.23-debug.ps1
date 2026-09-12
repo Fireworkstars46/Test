@@ -266,14 +266,7 @@ $lowRow = @'
     }
 
 '@
-Replace-Block '    void ApplyLowRowWidgetCap(QWidget *widget, int targetHeight)' '    void ReassertSceneRowLock()' $lowRow 'recursive low-row force helpers'
-
-# v3.22's generated source does not yet have ApplyLowRowWidgetCap at the start
-# marker because that helper was new here. Fall back to replacing the original
-# v3.22 low-row block when chaining directly from v3.22.
-if (-not $s.Contains('    void ApplyLowRowWidgetCap(QWidget *widget, int targetHeight)')) {
-    Replace-Block '    void ReleaseLowRowFloorLatch()' '    void ReassertSceneRowLock()' $lowRow 'recursive low-row force helpers fallback'
-}
+Replace-Block '    void ReleaseLowRowFloorLatch()' '    void ReassertSceneRowLock()' $lowRow 'recursive low-row force helpers'
 
 # Make row=1/2 immediately authoritative when its floor is captured. The user no
 # longer has to somehow drag through Qt's hidden 3-row stop before the special
