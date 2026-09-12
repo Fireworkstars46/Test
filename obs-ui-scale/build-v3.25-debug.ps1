@@ -268,7 +268,7 @@ $debugWrite = @'
     }
 
 '@
-Replace-Block '    void DebugWrite(const QString &message)' '    QString DebugSceneName() const' $debugWrite 'batched debug file writes'
+Replace-Block '    void DebugWrite(const QString &message)' '    void SetDebugLoggingEnabled(bool enabled)' $debugWrite 'batched debug file writes'
 
 # Full geometry snapshots remain available to the complete test, but ordinary
 # debug mode no longer walks every OBS dock/widget.
