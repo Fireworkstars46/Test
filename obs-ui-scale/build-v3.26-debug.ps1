@@ -166,13 +166,23 @@ Replace-Required @'
                 }
 '@ 'Apply guard accepts physical one-row floor'
 
-# Scene repair gets the same rule. If 95px visibly equals one requested row while
-# an old target says 89px, 95px becomes the immutable target instead of causing
-# repeated resizeDocks calls for the whole Scene settle window.
-Replace-Required @'
+# Scene repair gets the same rule, but patch ONLY
+# RestoreAuthoritativeSceneDockTarget(). The same mixer declarations also exist
+# in several unrelated functions that do not have a targetHeight variable.
+$sceneStart = $s.IndexOf('    void RestoreAuthoritativeSceneDockTarget()')
+$sceneEnd = $s.IndexOf('    void ArmSceneDockGuard()', $sceneStart)
+if ($sceneStart -lt 0 -or $sceneEnd -lt 0) {
+    throw 'v3.26 could not isolate RestoreAuthoritativeSceneDockTarget'
+}
+$sceneBlock = $s.Substring($sceneStart, $sceneEnd - $sceneStart)
+$sceneNeedle = @'
         QStackedWidget *mixer = StackedMixerArea();
         QDockWidget *mixerDock = AudioMixerDock();
-'@ @'
+'@
+if (-not $sceneBlock.Contains($sceneNeedle)) {
+    throw 'v3.26 Scene guard mixer insertion point missing'
+}
+$sceneInsert = @'
         if (AdoptEquivalentLowRowPhysicalHeight(
                 targetHeight, QStringLiteral("Scene guard"))) {
             targetHeight = sceneDock->height();
@@ -182,7 +192,9 @@ Replace-Required @'
 
         QStackedWidget *mixer = StackedMixerArea();
         QDockWidget *mixerDock = AudioMixerDock();
-'@ 'Scene guard adopts physical low-row floor'
+'@
+$sceneBlock = $sceneBlock.Replace($sceneNeedle, $sceneInsert)
+$s = $s.Substring(0, $sceneStart) + $sceneBlock + $s.Substring($sceneEnd)
 
 # The complete test is testing "one visible row", not an impossible theoretical
 # padding pixel. Once the physical equivalent is adopted, lockedSceneDockHeight_
