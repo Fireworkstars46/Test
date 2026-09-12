@@ -31,12 +31,20 @@ if (-not $s.Contains('#include <QEventLoop>')) {
     $s = $s.Replace('#include <QFileInfo>', "#include <QEventLoop>`n#include <QFileInfo>")
 }
 
-# IMPORTANT: this is the old v2.9 one-time floor resize that still runs before
-# v3.27's minimum-only preservation branch. Patch the resize call itself because
-# later versions changed the surrounding comments/spacing.
-Replace-Required @'
-        mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_}, Qt::Vertical);
-'@ @'
+# IMPORTANT: patch ONLY CaptureAndApplySceneRowLock(). The same resizeDocks
+# line also exists under single-line if statements elsewhere; replacing it
+# globally would put a local declaration inside that if and break scope.
+$captureStart = $s.IndexOf('    void CaptureAndApplySceneRowLock()')
+$captureEnd = $s.IndexOf('    void ScheduleSceneRowLockCapture(double uiPercent)', $captureStart)
+if ($captureStart -lt 0 -or $captureEnd -lt 0) {
+    throw 'v3.29 could not isolate CaptureAndApplySceneRowLock'
+}
+$captureBlock = $s.Substring($captureStart, $captureEnd - $captureStart)
+$floorResizeNeedle = '        mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_}, Qt::Vertical);'
+if (-not $captureBlock.Contains($floorResizeNeedle)) {
+    throw 'v3.29 capture floor-resize call missing'
+}
+$floorResizeReplacement = @'
         int preFloorManualTarget = -1;
         if (realApplySmoothGuardActive_ && realApplySmoothExpectedHeight_ > 0)
             preFloorManualTarget = realApplySmoothExpectedHeight_;
@@ -60,7 +68,9 @@ Replace-Required @'
                            .arg(preFloorManualTarget)
                            .arg(sceneDock->height()));
         }
-'@ 'skip unconditional low-row floor collapse for taller manual height'
+'@
+$captureBlock = $captureBlock.Replace($floorResizeNeedle, $floorResizeReplacement.TrimEnd())
+$s = $s.Substring(0, $captureStart) + $captureBlock + $s.Substring($captureEnd)
 
 # The fully automatic test is allowed to run a tiny nested Qt event loop because
 # it explicitly excludes user input. This lets resizeDocks/layout events settle
