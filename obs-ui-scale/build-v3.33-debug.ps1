@@ -103,16 +103,11 @@ $manualRelaxHelper = @'
 $s = $s.Substring(0, $restorePos) + $manualRelaxHelper + $s.Substring($restorePos)
 
 Replace-Required @'
-                        if (sceneRowLockEnabled_ && sceneVisibleRows_ <= 2)
-                            ScheduleManualReleasePerfectRowSnap();
-
                         Q_UNUSED(shrinking);
 '@ @'
-                        if (sceneRowLockEnabled_ && sceneVisibleRows_ <= 2) {
-                            if (shrinking)
-                                RelaxLowRowDescendantsForManualDrag();
-                            ScheduleManualReleasePerfectRowSnap();
-                        }
+                        if (sceneRowLockEnabled_ && sceneVisibleRows_ <= 2 && shrinking)
+                            RelaxLowRowDescendantsForManualDrag();
+                        Q_UNUSED(shrinking);
 '@ 'temporarily relax hints during real downward drag'
 
 Replace-Required @'
