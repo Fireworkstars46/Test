@@ -409,17 +409,12 @@ if ($prepareStart -lt 0 -or $prepareEnd -lt 0) {
 }
 $prepare = $s.Substring($prepareStart, $prepareEnd - $prepareStart)
 
-$visibleMarker = @'
-        if (!sceneDock || !sceneDock->isVisible())
-            return;
-'@
-if (-not $prepare.Contains($visibleMarker)) {
-    throw 'v3.34 Prepare visible marker missing'
+$floorMarker = '        const int floor = (sceneRowLockEnabled_ && lockedSceneDockHeight_ > 0)'
+$floorPos = $prepare.IndexOf($floorMarker)
+if ($floorPos -lt 0) {
+    throw 'v3.34 Prepare floor marker missing'
 }
 $prepareInsert = @'
-        if (!sceneDock || !sceneDock->isVisible())
-            return;
-
         const int rowsBeforeApply = CountFullyVisibleSceneRows();
         const int pitchBeforeApply = qMax(1, CurrentSceneRowHeight());
         const bool nearLowRowFloor =
@@ -439,8 +434,11 @@ $prepareInsert = @'
                            .arg(lockedSceneDockHeight_)
                            .arg(pitchBeforeApply));
         }
+
 '@
-$prepare = $prepare.Replace($visibleMarker, $prepareInsert)
+$prepare = $prepare.Substring(0, $floorPos) +
+           $prepareInsert +
+           $prepare.Substring($floorPos)
 
 $prepare = $prepare.Replace(
     '        if (newerManualDrag) {',
