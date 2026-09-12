@@ -175,12 +175,10 @@ if ($sceneStart -lt 0 -or $sceneEnd -lt 0) {
     throw 'v3.26 could not isolate RestoreAuthoritativeSceneDockTarget'
 }
 $sceneBlock = $s.Substring($sceneStart, $sceneEnd - $sceneStart)
-$sceneNeedle = @'
-        QStackedWidget *mixer = StackedMixerArea();
-        QDockWidget *mixerDock = AudioMixerDock();
-'@
-if (-not $sceneBlock.Contains($sceneNeedle)) {
-    throw 'v3.26 Scene guard mixer insertion point missing'
+$sceneNeedle = '        ReassertSceneRowLock();'
+$sceneNeedlePos = $sceneBlock.IndexOf($sceneNeedle)
+if ($sceneNeedlePos -lt 0) {
+    throw 'v3.26 Scene guard reassert insertion point missing'
 }
 $sceneInsert = @'
         if (AdoptEquivalentLowRowPhysicalHeight(
@@ -190,10 +188,10 @@ $sceneInsert = @'
                 sceneGuardTargetHeight_ = targetHeight;
         }
 
-        QStackedWidget *mixer = StackedMixerArea();
-        QDockWidget *mixerDock = AudioMixerDock();
 '@
-$sceneBlock = $sceneBlock.Replace($sceneNeedle, $sceneInsert)
+$sceneBlock = $sceneBlock.Substring(0, $sceneNeedlePos) +
+              $sceneInsert +
+              $sceneBlock.Substring($sceneNeedlePos)
 $s = $s.Substring(0, $sceneStart) + $sceneBlock + $s.Substring($sceneEnd)
 
 # The complete test is testing "one visible row", not an impossible theoretical
