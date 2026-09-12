@@ -75,7 +75,7 @@ $relaxScene = @'
             return;
 
         QDockWidget *sceneDock = ScenesDock();
-        QAbstractItemView *list = ScenesListView();
+        QListWidget *list = ScenesList();
         if (!sceneDock || !list)
             return;
 
@@ -352,7 +352,9 @@ Replace-Required @'
         lockedSceneDockHeight_ = targetDockHeight;
 '@ 'release stale latch when row setting changes'
 
-$gesturePos = $s.IndexOf('            IsManualBottomRowResizeGesture() &&')
+$eventFilterPos = $s.IndexOf('    bool eventFilter(QObject *watched, QEvent *event) override')
+if ($eventFilterPos -lt 0) { throw 'v3.22 could not locate eventFilter' }
+$gesturePos = $s.IndexOf('            IsManualBottomRowResizeGesture() &&', $eventFilterPos)
 if ($gesturePos -lt 0) { throw 'v3.22 could not locate manual gesture block' }
 $manualStart = $s.LastIndexOf('        if (event && event->type() == QEvent::Resize', $gesturePos)
 $manualEnd = $s.IndexOf('        return QObject::eventFilter(watched, event);', $gesturePos)
