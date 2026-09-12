@@ -110,18 +110,25 @@ Replace-Required @'
                         Q_UNUSED(shrinking);
 '@ 'temporarily relax hints during real downward drag'
 
-Replace-Required @'
-        } else {
-            const int pitch = qMax(1, CurrentSceneRowHeight());
-            const int desired = qMax(floor + qMax(180, pitch * 7),
-'@ @'
+$autoStart = $s.IndexOf('    int AutoMatrixDrag(bool down)')
+$autoEnd = $s.IndexOf('    bool AutoMatrixStableAt(int expected) const', $autoStart)
+if ($autoStart -lt 0 -or $autoEnd -lt 0) {
+    throw 'v3.33 could not isolate AutoMatrixDrag'
+}
+$autoBlock = $s.Substring($autoStart, $autoEnd - $autoStart)
+$autoElse = $autoBlock.IndexOf('        } else {')
+if ($autoElse -lt 0) {
+    throw 'v3.33 could not find automatic UP branch'
+}
+$autoInsert = @'
         } else {
             if (lowRowFloorLatchActive_)
                 ReleaseLowRowFloorLatch();
-
-            const int pitch = qMax(1, CurrentSceneRowHeight());
-            const int desired = qMax(floor + qMax(180, pitch * 7),
-'@ 'automatic UP releases exact-row latch first'
+'@
+$autoBlock = $autoBlock.Substring(0, $autoElse) +
+             $autoInsert.TrimEnd() +
+             $autoBlock.Substring($autoElse + '        } else {'.Length)
+$s = $s.Substring(0, $autoStart) + $autoBlock + $s.Substring($autoEnd)
 
 $s = $s.Replace('OBS UI Scale v3.32 DEBUG', 'OBS UI Scale v3.33 DEBUG')
 $s = $s.Replace('OBS UI Scale v3.32 DEBUG LOG', 'OBS UI Scale v3.33 DEBUG LOG')
