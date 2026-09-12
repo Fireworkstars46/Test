@@ -60,13 +60,12 @@ Replace-Required @'
                             : (isFontValue ? textPercent : uiPercent);
 '@ 'do not transform theme icon pixel metrics'
 
-Replace-Required @'
-                   "QAbstractItemView::item, QHeaderView::section { padding: %8px %9px; min-height: %14px; }
-"
-'@ @'
-                   "QHeaderView::section { padding: %8px %9px; min-height: %14px; }
-"
-'@ 'leave OBS SourceTree/SceneTree item delegate styling native'
+if ($s.Contains('QAbstractItemView::item, QHeaderView::section')) {
+    $s = $s.Replace('QAbstractItemView::item, QHeaderView::section',
+                    'QHeaderView::section')
+} elseif ($s.Contains('QAbstractItemView::item')) {
+    $s = $s.Replace('QAbstractItemView::item, ', '')
+}
 
 # ---------------------------------------------------------------------------
 # No global qApp event filter. It was invoked for every Qt event.
