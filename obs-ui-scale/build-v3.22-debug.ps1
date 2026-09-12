@@ -137,7 +137,7 @@ $refresh = @'
     }
 
 '@
-Replace-Block '    void RefreshWidgets()' '    void ApplyScale(double requestedUiPercent' $refresh 'targeted RefreshWidgets'
+Replace-Block '    void RefreshWidgets()' '    void PrepareForRealApplyButton()' $refresh 'targeted RefreshWidgets'
 
 $debugWidget = @'
     void DebugWidgetEvent(QWidget *widget, QEvent::Type type)
