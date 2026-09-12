@@ -31,23 +31,12 @@ if (-not $s.Contains('#include <QEventLoop>')) {
     $s = $s.Replace('#include <QFileInfo>', "#include <QEventLoop>`n#include <QFileInfo>")
 }
 
-# IMPORTANT: this is the old v2.9 one-time floor resize that runs before the
-# v3.27 low-row preservation branch. It must NOT run when Apply already owns a
-# taller manual target.
+# IMPORTANT: this is the old v2.9 one-time floor resize that still runs before
+# v3.27's minimum-only preservation branch. Patch the resize call itself because
+# later versions changed the surrounding comments/spacing.
 Replace-Required @'
-        sceneDock->installEventFilter(this);
-        mixer->installEventFilter(this);
-        ReassertSceneRowLock();
-
-        // Applying/changing the setting starts the dock at the selected minimum.
-        // After this one-time resize, normal upward dragging remains unrestricted.
         mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_}, Qt::Vertical);
-        ReassertSceneRowLock();
 '@ @'
-        sceneDock->installEventFilter(this);
-        mixer->installEventFilter(this);
-        ReassertSceneRowLock();
-
         int preFloorManualTarget = -1;
         if (realApplySmoothGuardActive_ && realApplySmoothExpectedHeight_ > 0)
             preFloorManualTarget = realApplySmoothExpectedHeight_;
@@ -61,8 +50,6 @@ Replace-Required @'
             sceneVisibleRows_ <= 2 &&
             preFloorManualTarget > lockedSceneDockHeight_ + preFloorPitch;
 
-        // "Minimum scene rows" is a floor. Never collapse a taller manual
-        // position merely because Apply is recalculating the floor.
         if (!preserveHigherBeforeFloorResize) {
             mainWindow->resizeDocks({sceneDock}, {lockedSceneDockHeight_},
                                     Qt::Vertical);
@@ -73,7 +60,6 @@ Replace-Required @'
                            .arg(preFloorManualTarget)
                            .arg(sceneDock->height()));
         }
-        ReassertSceneRowLock();
 '@ 'skip unconditional low-row floor collapse for taller manual height'
 
 # The fully automatic test is allowed to run a tiny nested Qt event loop because
