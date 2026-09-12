@@ -150,7 +150,7 @@ $poll = @'
     }
 
 '@
-Replace-Block '    void PollLowRowFloorLatchForUnlock(int generation)' '    bool ForceBottomRowHeightNow' $poll 'robust exact-row latch unlock watcher'
+Replace-Block '    void PollLowRowFloorLatchForUnlock(int generation)' '    bool AdoptEquivalentLowRowPhysicalHeight' $poll 'robust exact-row latch unlock watcher'
 
 # Keep the row exact after a successful low-row force by capping only the live
 # QDockWidgets themselves. Do NOT leave their child widgets in Ignored policy.
