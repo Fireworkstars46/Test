@@ -5,6 +5,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -14,6 +15,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -35,23 +37,44 @@ import io.github.muntashirakon.adb.android.AndroidUtils;
 
 public class MainActivity extends Activity {
     private static final int SAVE_REQUEST = 42;
+    private static final String PREFS = "crash_monitor_settings";
+    private static final String PREF_MASTER = "master_enabled";
+
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final StringBuilder logBuffer = new StringBuilder();
+
     private TextView status;
     private TextView logView;
     private EditText portInput;
     private EditText codeInput;
+    private Button connectButton;
     private Button startButton;
     private Button stopButton;
+    private Switch masterSwitch;
+
     private volatile boolean monitoring;
+    private volatile boolean masterEnabled;
     private volatile AdbStream monitorStream;
+    private boolean changingMasterProgrammatically;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
-        setStatus("Checking Wireless debugging connection…");
-        executor.submit(this::autoConnect);
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        masterEnabled = prefs.getBoolean(PREF_MASTER, true);
+        changingMasterProgrammatically = true;
+        masterSwitch.setChecked(masterEnabled);
+        changingMasterProgrammatically = false;
+        updateMasterUi();
+
+        if (masterEnabled) {
+            setStatus("Master ON — checking Wireless debugging connection…");
+            executor.submit(this::autoConnect);
+        } else {
+            setStatus("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+        }
     }
 
     private int dp(int n) {
@@ -82,8 +105,30 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
+        LinearLayout masterRow = new LinearLayout(this);
+        masterRow.setOrientation(LinearLayout.HORIZONTAL);
+        masterRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView masterLabel = text("Master power", 17);
+        masterLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        masterRow.addView(masterLabel, new LinearLayout.LayoutParams(0, dp(54), 1));
+        masterSwitch = new Switch(this);
+        masterSwitch.setTextOff("OFF");
+        masterSwitch.setTextOn("ON");
+        masterSwitch.setShowText(true);
+        masterRow.addView(masterSwitch, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(54)));
+        root.addView(masterRow);
+
+        TextView masterHelp = text("OFF stops monitoring and disconnects ADB, but keeps your Wireless debugging pairing saved. Turn it ON later to reconnect without pairing again.", 13);
+        root.addView(masterHelp);
+
         status = text("Not connected", 15);
         root.addView(status);
+
+        masterSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (changingMasterProgrammatically) return;
+            setMasterEnabled(isChecked);
+        });
 
         TextView help = text("No Shizuku needed. Pair this app once with Android Wireless debugging, then it can read crash logs from other apps.", 14);
         root.addView(help);
@@ -121,12 +166,16 @@ public class MainActivity extends Activity {
         findPort.setOnClickListener(v -> findPairingPort());
         pair.setOnClickListener(v -> pair());
 
-        Button connect = button("Connect / reconnect");
-        connect.setOnClickListener(v -> {
+        connectButton = button("Connect / reconnect");
+        connectButton.setOnClickListener(v -> {
+            if (!masterEnabled) {
+                toast("Turn Master power ON first.");
+                return;
+            }
             setStatus("Connecting…");
             executor.submit(this::autoConnect);
         });
-        root.addView(connect);
+        root.addView(connectButton);
 
         LinearLayout monitorButtons = new LinearLayout(this);
         monitorButtons.setOrientation(LinearLayout.HORIZONTAL);
@@ -136,7 +185,13 @@ public class MainActivity extends Activity {
         monitorButtons.addView(startButton, new LinearLayout.LayoutParams(0, dp(58), 1));
         monitorButtons.addView(stopButton, new LinearLayout.LayoutParams(0, dp(58), 1));
         root.addView(monitorButtons);
-        startButton.setOnClickListener(v -> executor.submit(this::startMonitoring));
+        startButton.setOnClickListener(v -> {
+            if (!masterEnabled) {
+                toast("Turn Master power ON first.");
+                return;
+            }
+            executor.submit(this::startMonitoring);
+        });
         stopButton.setOnClickListener(v -> stopMonitoring());
 
         LinearLayout actions = new LinearLayout(this);
@@ -170,6 +225,37 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
         setContentView(root);
+    }
+
+    private void setMasterEnabled(boolean enabled) {
+        masterEnabled = enabled;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_MASTER, enabled).apply();
+        updateMasterUi();
+
+        if (enabled) {
+            setStatus("Master ON — reconnecting with saved pairing…");
+            executor.submit(this::autoConnect);
+        } else {
+            stopMonitoring();
+            setStatus("Master OFF — shutting down ADB connection. Pairing stays saved.");
+            executor.submit(() -> {
+                try {
+                    AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
+                    if (manager.isConnected()) manager.disconnect();
+                    setStatus("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                } catch (Throwable e) {
+                    setStatus("Master OFF — monitoring stopped. Pairing is saved.");
+                }
+            });
+        }
+    }
+
+    private void updateMasterUi() {
+        runOnUiThread(() -> {
+            if (connectButton != null) connectButton.setEnabled(masterEnabled);
+            if (startButton != null) startButton.setEnabled(masterEnabled && !monitoring);
+            if (stopButton != null) stopButton.setEnabled(masterEnabled && monitoring);
+        });
     }
 
     private void setStatus(String s) {
@@ -222,8 +308,12 @@ public class MainActivity extends Activity {
                 AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
                 boolean ok = manager.pair(AndroidUtils.getHostIpAddress(this), port, code);
                 if (ok) {
-                    setStatus("Paired. Connecting…");
-                    autoConnect();
+                    if (masterEnabled) {
+                        setStatus("Paired. Connecting…");
+                        autoConnect();
+                    } else {
+                        setStatus("Paired successfully. Master is OFF, so the connection stays off. Pairing is saved.");
+                    }
                 } else {
                     setStatus("Pairing failed. Generate a new pairing code and try again.");
                 }
@@ -234,6 +324,10 @@ public class MainActivity extends Activity {
     }
 
     private void autoConnect() {
+        if (!masterEnabled) {
+            setStatus("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+            return;
+        }
         try {
             AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
             if (manager.isConnected()) {
@@ -247,15 +341,20 @@ public class MainActivity extends Activity {
                 setStatus("Not paired yet. Open Wireless debugging → Pair device with pairing code.");
                 return;
             }
+            if (!masterEnabled) {
+                if (manager.isConnected()) manager.disconnect();
+                setStatus("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                return;
+            }
             if (ok) setStatus("Connected — ready to monitor crashes.");
             else setStatus("Not connected. Make sure Wireless debugging is ON, then tap Connect / reconnect.");
         } catch (Throwable e) {
-            setStatus("Connection error: " + shortError(e));
+            if (masterEnabled) setStatus("Connection error: " + shortError(e));
         }
     }
 
     private void startMonitoring() {
-        if (monitoring) return;
+        if (!masterEnabled || monitoring) return;
         try {
             AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
             if (!manager.isConnected()) {
@@ -271,31 +370,27 @@ public class MainActivity extends Activity {
                 }
             }
 
+            if (!masterEnabled) return;
             clearDeviceCrashBuffer(manager);
             monitoring = true;
-            runOnUiThread(() -> {
-                startButton.setEnabled(false);
-                stopButton.setEnabled(true);
-            });
+            updateMasterUi();
             setStatus("Monitoring crashes… now reproduce the crash.");
 
             monitorStream = manager.openStream("shell:logcat -b crash -v threadtime");
             try (InputStream in = monitorStream.openInputStream();
                  BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
                 String line;
-                while (monitoring && (line = reader.readLine()) != null) {
+                while (masterEnabled && monitoring && (line = reader.readLine()) != null) {
                     appendLog(line + "\n");
                 }
             }
         } catch (Throwable e) {
-            if (monitoring) appendLog("\n[Monitor error] " + shortError(e) + "\n");
+            if (masterEnabled && monitoring) appendLog("\n[Monitor error] " + shortError(e) + "\n");
         } finally {
             monitoring = false;
-            runOnUiThread(() -> {
-                startButton.setEnabled(true);
-                stopButton.setEnabled(false);
-            });
-            setStatus("Monitoring stopped.");
+            monitorStream = null;
+            updateMasterUi();
+            if (masterEnabled) setStatus("Monitoring stopped.");
         }
     }
 
@@ -322,7 +417,8 @@ public class MainActivity extends Activity {
                 try { s.close(); } catch (Exception ignored) { }
             });
         }
-        setStatus("Monitoring stopped.");
+        updateMasterUi();
+        if (masterEnabled) setStatus("Monitoring stopped.");
     }
 
     private void appendLog(String s) {
