@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -37,12 +38,19 @@ public class MonitoringService extends Service {
     public static final String PREF_MASTER = "master_enabled";
     public static final String PREF_MONITORING = "monitoring_enabled";
     public static final String PREF_STATE = "service_state";
+
+    // The raw file is intentionally unmodified logcat output. The important file is a
+    // second, classified view so install failures/crashes/ANRs are easy to find.
     public static final String LOG_FILE = "crash-monitor-live.txt";
+    public static final String IMPORTANT_FILE = "crash-monitor-important.txt";
 
     private static final String CHANNEL_ID = "crash_monitor_running";
     private static final int NOTIFICATION_ID = 4646;
-    private static final long MAX_LOG_BYTES = 1_500_000L;
-    private static final long KEEP_LOG_BYTES = 1_000_000L;
+
+    private static final long RAW_MAX_BYTES = 8_000_000L;
+    private static final long RAW_KEEP_BYTES = 5_000_000L;
+    private static final long IMPORTANT_MAX_BYTES = 2_000_000L;
+    private static final long IMPORTANT_KEEP_BYTES = 1_400_000L;
 
     private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService controlExecutor = Executors.newCachedThreadPool();
@@ -74,14 +82,14 @@ public class MonitoringService extends Service {
             return START_NOT_STICKY;
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Crash Monitor is ready"));
+        startForeground(NOTIFICATION_ID, buildNotification("System Log Monitor is ready"));
 
         if (ACTION_START_MONITORING.equals(action)) {
             prefs.edit().putBoolean(PREF_MONITORING, true).apply();
             clearOnNextConnect = true;
             stopRequested = false;
             closeMonitorStream();
-            setState("Starting crash monitoring…");
+            setState("Starting full Android logging…");
             startWorkerIfNeeded();
             return START_STICKY;
         }
@@ -89,12 +97,12 @@ public class MonitoringService extends Service {
         if (ACTION_STOP_MONITORING.equals(action)) {
             prefs.edit().putBoolean(PREF_MONITORING, false).apply();
             closeMonitorStream();
-            setState("Ready — monitoring stopped. Master power is still ON.");
+            setState("Ready — logging stopped. Master power is still ON.");
             return START_STICKY;
         }
 
         if (ACTION_CLEAR.equals(action)) {
-            controlExecutor.submit(this::clearAllLogs);
+            controlExecutor.submit(this::clearLocalLogs);
             return START_STICKY;
         }
 
@@ -110,7 +118,7 @@ public class MonitoringService extends Service {
             stopRequested = false;
             startWorkerIfNeeded();
         } else {
-            setState("Ready — monitoring stopped. Master power is still ON.");
+            setState("Ready — logging stopped. Master power is still ON.");
             controlExecutor.submit(this::ensureConnectedOnce);
         }
 
@@ -147,29 +155,26 @@ public class MonitoringService extends Service {
 
                     if (clearOnNextConnect) {
                         clearOnNextConnect = false;
-                        clearDeviceCrashBuffer(manager);
-                        clearLocalLog();
+                        // Clear only our files. Do not erase Android's system log buffers.
+                        clearLocalLogs();
                     }
 
                     if (!isMonitoringEnabled()) break;
 
-                    setState("Monitoring crashes in background");
-                    monitorStream = manager.openStream("shell:logcat -b crash -v threadtime");
-                    try (InputStream in = monitorStream.openInputStream();
-                         BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                        String line;
-                        while (!stopRequested && isMasterEnabled() && isMonitoringEnabled()
-                                && (line = reader.readLine()) != null) {
-                            appendLog(line + "\n");
-                        }
-                    } finally {
-                        closeMonitorStream();
-                    }
+                    setState("Logging ALL ADB-visible Android log buffers");
+                    // -b all includes every logcat buffer the paired ADB shell is allowed to read
+                    // (main/system/crash/events/radio and any other available buffers).
+                    // -T 1 starts at the newest entry, then follows new entries continuously.
+                    monitorStream = manager.openStream("shell:logcat -b all -v threadtime -T 1");
+                    captureStream(monitorStream);
                 } catch (Throwable e) {
                     if (!stopRequested && isMasterEnabled() && isMonitoringEnabled()) {
+                        appendImportant("[MONITOR] " + shortError(e));
                         setState("Reconnecting after monitor error…");
                         sleepQuietly(2000);
                     }
+                } finally {
+                    closeMonitorStream();
                 }
             }
         } finally {
@@ -177,11 +182,124 @@ public class MonitoringService extends Service {
                 workerRunning = false;
             }
             if (!isMasterEnabled() || stopRequested) {
-                setState("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                setState("Master OFF — logging and ADB connection are off. Pairing is saved.");
             } else if (!isMonitoringEnabled()) {
-                setState("Ready — monitoring stopped. Master power is still ON.");
+                setState("Ready — logging stopped. Master power is still ON.");
             }
         }
+    }
+
+    private void captureStream(AdbStream stream) throws Exception {
+        File rawFile = new File(getFilesDir(), LOG_FILE);
+        File importantFile = new File(getFilesDir(), IMPORTANT_FILE);
+        FileOutputStream rawOut = null;
+        FileOutputStream importantOut = null;
+        long rawSize = rawFile.exists() ? rawFile.length() : 0L;
+        long importantSize = importantFile.exists() ? importantFile.length() : 0L;
+        int linesSinceFlush = 0;
+
+        try (InputStream in = stream.openInputStream();
+             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            rawOut = new FileOutputStream(rawFile, true);
+            importantOut = new FileOutputStream(importantFile, true);
+
+            String line;
+            while (!stopRequested && isMasterEnabled() && isMonitoringEnabled()
+                    && (line = reader.readLine()) != null) {
+                String rawLine = line + "\n";
+                byte[] rawBytes = rawLine.getBytes(StandardCharsets.UTF_8);
+                rawOut.write(rawBytes);
+                rawSize += rawBytes.length;
+
+                String category = classify(line);
+                if (category != null) {
+                    String marked = category + " " + line + "\n";
+                    byte[] importantBytes = marked.getBytes(StandardCharsets.UTF_8);
+                    importantOut.write(importantBytes);
+                    importantSize += importantBytes.length;
+                }
+
+                linesSinceFlush++;
+                if (linesSinceFlush >= 40) {
+                    rawOut.flush();
+                    importantOut.flush();
+                    linesSinceFlush = 0;
+
+                    if (rawSize > RAW_MAX_BYTES) {
+                        rawOut.close();
+                        rawOut = null;
+                        trimFile(rawFile, RAW_KEEP_BYTES);
+                        rawSize = rawFile.length();
+                        rawOut = new FileOutputStream(rawFile, true);
+                    }
+                    if (importantSize > IMPORTANT_MAX_BYTES) {
+                        importantOut.close();
+                        importantOut = null;
+                        trimFile(importantFile, IMPORTANT_KEEP_BYTES);
+                        importantSize = importantFile.length();
+                        importantOut = new FileOutputStream(importantFile, true);
+                    }
+                }
+            }
+        } finally {
+            if (rawOut != null) {
+                try { rawOut.flush(); } catch (Throwable ignored) { }
+                try { rawOut.close(); } catch (Throwable ignored) { }
+            }
+            if (importantOut != null) {
+                try { importantOut.flush(); } catch (Throwable ignored) { }
+                try { importantOut.close(); } catch (Throwable ignored) { }
+            }
+        }
+    }
+
+    private String classify(String line) {
+        String l = line.toLowerCase(Locale.US);
+
+        // Install/update/package-parser failures get first priority because these often
+        // explain Android's vague "App not installed" / "Invalid" messages.
+        if (l.contains("install_failed") || l.contains("install_parse_failed")
+                || l.contains("failed to install") || l.contains("failure [install")
+                || l.contains("package installer") || l.contains("packageinstaller")
+                || (l.contains("packagemanager") && (l.contains("install") || l.contains("parse") || l.contains("invalid apk")))
+                || (l.contains("installd") && (l.contains("install") || l.contains("failed") || l.contains("error")))) {
+            return "[INSTALL]";
+        }
+
+        if (l.contains("fatal exception") || l.contains("androidruntime")
+                || l.contains("fatal signal") || l.contains("am_crash")
+                || l.contains("tombstone") || l.contains("native crash")) {
+            return "[CRASH]";
+        }
+
+        if (l.contains("anr in") || l.contains("am_anr")
+                || l.contains("application not responding")
+                || l.contains("input dispatching timed out")) {
+            return "[ANR]";
+        }
+
+        if (l.contains("securityexception") || l.contains("permission denial")
+                || l.contains("avc: denied") || l.contains("not allowed")
+                || l.contains("permission denied")) {
+            return "[SECURITY]";
+        }
+
+        // threadtime format includes a one-letter priority column. This catches generic
+        // error lines that did not match the more useful categories above.
+        if (line.matches(".*\\sE\\s+[^:]+:.*") || l.contains(" exception:")
+                || l.contains(" error:")) {
+            return "[ERROR]";
+        }
+
+        return null;
+    }
+
+    private void appendImportant(String text) {
+        File f = new File(getFilesDir(), IMPORTANT_FILE);
+        try (FileOutputStream out = new FileOutputStream(f, true)) {
+            out.write((text + "\n").getBytes(StandardCharsets.UTF_8));
+        } catch (Throwable ignored) { }
+        if (f.length() > IMPORTANT_MAX_BYTES) trimFile(f, IMPORTANT_KEEP_BYTES);
     }
 
     private boolean isMasterEnabled() {
@@ -215,69 +333,43 @@ public class MonitoringService extends Service {
             startWorkerIfNeeded();
         } else {
             ensureConnectedOnce();
-            setState("Ready — monitoring stopped. Master power is still ON.");
+            setState("Ready — logging stopped. Master power is still ON.");
         }
     }
 
-    private void clearAllLogs() {
-        try {
-            AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
-            if (manager.isConnected()) clearDeviceCrashBuffer(manager);
-        } catch (Throwable ignored) { }
-        clearLocalLog();
-        if (isMonitoringEnabled()) setState("Monitoring crashes in background");
-        else setState("Ready — monitoring stopped. Master power is still ON.");
+    private void clearLocalLogs() {
+        clearFile(new File(getFilesDir(), LOG_FILE));
+        clearFile(new File(getFilesDir(), IMPORTANT_FILE));
+        if (isMonitoringEnabled()) setState("Logging ALL ADB-visible Android log buffers");
+        else setState("Ready — logging stopped. Master power is still ON.");
     }
 
-    private void clearDeviceCrashBuffer(AdbConnectionManager manager) {
-        AdbStream s = null;
-        try {
-            s = manager.openStream("shell:logcat -b crash -c");
-            try (InputStream in = s.openInputStream()) {
-                byte[] buf = new byte[256];
-                while (in.read(buf) >= 0) { }
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            if (s != null) {
-                try { s.close(); } catch (Throwable ignored) { }
-            }
-        }
-    }
-
-    private void appendLog(String text) {
-        try {
-            File f = new File(getFilesDir(), LOG_FILE);
-            try (FileOutputStream out = new FileOutputStream(f, true)) {
-                out.write(text.getBytes(StandardCharsets.UTF_8));
-            }
-            trimLogIfNeeded(f);
+    private void clearFile(File f) {
+        try (FileOutputStream out = new FileOutputStream(f, false)) {
+            out.write(new byte[0]);
         } catch (Throwable ignored) { }
     }
 
-    private void clearLocalLog() {
-        try {
-            File f = new File(getFilesDir(), LOG_FILE);
-            try (FileOutputStream out = new FileOutputStream(f, false)) {
-                out.write(new byte[0]);
-            }
-        } catch (Throwable ignored) { }
-    }
-
-    private void trimLogIfNeeded(File f) {
-        if (!f.exists() || f.length() <= MAX_LOG_BYTES) return;
+    private void trimFile(File f, long keepBytes) {
+        if (!f.exists() || f.length() <= keepBytes) return;
         try (FileInputStream in = new FileInputStream(f)) {
-            byte[] all = new byte[(int) f.length()];
+            long length = f.length();
+            int keep = (int) Math.min(keepBytes, length);
+            byte[] tail = new byte[keep];
+            long skip = length - keep;
+            while (skip > 0) {
+                long n = in.skip(skip);
+                if (n <= 0) break;
+                skip -= n;
+            }
             int off = 0;
-            while (off < all.length) {
-                int n = in.read(all, off, all.length - off);
+            while (off < keep) {
+                int n = in.read(tail, off, keep - off);
                 if (n < 0) break;
                 off += n;
             }
-            int keep = (int) Math.min(KEEP_LOG_BYTES, off);
-            byte[] tail = Arrays.copyOfRange(all, off - keep, off);
             try (FileOutputStream out = new FileOutputStream(f, false)) {
-                out.write(tail);
+                out.write(Arrays.copyOf(tail, off));
             }
         } catch (Throwable ignored) { }
     }
@@ -289,7 +381,7 @@ public class MonitoringService extends Service {
             AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
             if (manager.isConnected()) manager.disconnect();
         } catch (Throwable ignored) { }
-        setState("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+        setState("Master OFF — logging and ADB connection are off. Pairing is saved.");
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -314,9 +406,9 @@ public class MonitoringService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "Crash monitoring",
+                "Android log monitoring",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Keeps Crash Monitor running while the app is closed.");
+        channel.setDescription("Keeps full Android log monitoring running while the app is closed.");
         nm.createNotificationChannel(channel);
     }
 
@@ -336,6 +428,13 @@ public class MonitoringService extends Service {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .build();
+    }
+
+    private static String shortError(Throwable e) {
+        Throwable t = e;
+        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
+        String m = t.getMessage();
+        return t.getClass().getSimpleName() + (m == null ? "" : ": " + m);
     }
 
     private static void sleepQuietly(long ms) {
