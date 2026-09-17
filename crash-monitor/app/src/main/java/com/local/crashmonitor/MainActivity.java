@@ -26,6 +26,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
@@ -40,6 +41,8 @@ import io.github.muntashirakon.adb.android.AndroidUtils;
 public class MainActivity extends Activity {
     private static final int SAVE_REQUEST = 42;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 46;
+    private static final int PREVIEW_IMPORTANT_BYTES = 120_000;
+    private static final int PREVIEW_RAW_BYTES = 260_000;
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -108,6 +111,7 @@ public class MainActivity extends Activity {
         TextView title = text("Crash Monitor", 26);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
+        root.addView(text("Full Android log + crash / install failure detector", 14));
 
         LinearLayout masterRow = new LinearLayout(this);
         masterRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -123,11 +127,10 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(54)));
         root.addView(masterRow);
 
-        TextView masterHelp = text(
+        root.addView(text(
                 "Master ON keeps the background service alive even if you close or swipe away the app. " +
-                "Start/Stop below only controls crash monitoring. Master OFF shuts down the service and ADB connection, while keeping pairing saved.",
-                13);
-        root.addView(masterHelp);
+                "Start/Stop below controls logging. Master OFF shuts down the service and ADB connection, while keeping pairing saved.",
+                13));
 
         status = text("Starting…", 15);
         root.addView(status);
@@ -135,44 +138,31 @@ public class MainActivity extends Activity {
         masterSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (changingMasterProgrammatically) return;
             getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(MonitoringService.PREF_MASTER, isChecked)
-                    .apply();
+                    .edit().putBoolean(MonitoringService.PREF_MASTER, isChecked).apply();
             if (isChecked) {
                 startMonitorService(false, MonitoringService.ACTION_START);
-                toast("Master ON — the background service stays running when the app is closed.");
+                toast("Master ON — background service stays running when the app is closed.");
             } else {
                 Intent stop = new Intent(this, MonitoringService.class);
                 stop.setAction(MonitoringService.ACTION_STOP);
-                try {
-                    startService(stop);
-                } catch (Throwable e) {
-                    stopService(new Intent(this, MonitoringService.class));
-                }
-                getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
-                        .edit()
+                try { startService(stop); }
+                catch (Throwable e) { stopService(new Intent(this, MonitoringService.class)); }
+                getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE).edit()
                         .putString(MonitoringService.PREF_STATE,
-                                "Master OFF — monitoring and ADB connection are off. Pairing is saved.")
-                        .apply();
-                status.setText("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                                "Master OFF — logging and ADB connection are off. Pairing is saved.").apply();
+                status.setText("Master OFF — logging and ADB connection are off. Pairing is saved.");
             }
             updateMonitoringButtons();
         });
 
         Button openWireless = button("Open Developer options / Wireless debugging");
         openWireless.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
-            } catch (Exception e) {
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
-            }
+            try { startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)); }
+            catch (Exception e) { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
         });
         root.addView(openWireless);
 
-        TextView pairHelp = text(
-                "Pairing is only needed once. If this app is already paired, you can leave the boxes below alone.",
-                13);
-        root.addView(pairHelp);
+        root.addView(text("Pairing is only needed once. If this app is already paired, leave these boxes alone.", 13));
 
         LinearLayout pairRow = new LinearLayout(this);
         pairRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -220,45 +210,49 @@ public class MainActivity extends Activity {
                 toast("Turn Master power ON first.");
                 return;
             }
-            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
-                    .edit().putBoolean(MonitoringService.PREF_MONITORING, true).apply();
+            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(MonitoringService.PREF_MONITORING, true).apply();
             startMonitorService(true, MonitoringService.ACTION_START_MONITORING);
-            status.setText("Starting crash monitoring…");
+            status.setText("Starting full Android logging…");
             updateMonitoringButtons();
         });
 
         stopMonitoringButton.setOnClickListener(v -> {
             if (!masterSwitch.isChecked()) return;
-            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
-                    .edit().putBoolean(MonitoringService.PREF_MONITORING, false).apply();
+            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(MonitoringService.PREF_MONITORING, false).apply();
             startMonitorService(false, MonitoringService.ACTION_STOP_MONITORING);
-            status.setText("Ready — monitoring stopped. Master power is still ON.");
+            status.setText("Ready — logging stopped. Master power is still ON.");
             updateMonitoringButtons();
         });
+
+        root.addView(text(
+                "While monitoring is ON, it records every ADB-visible logcat buffer. Important lines are copied into categories: [INSTALL], [CRASH], [ANR], [SECURITY], and [ERROR].",
+                12));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         Button clear = button("Clear");
-        Button copy = button("Copy");
-        Button save = button("Save TXT");
+        Button copy = button("Copy latest");
+        Button save = button("Save full TXT");
         actions.addView(clear, new LinearLayout.LayoutParams(0, dp(54), 1));
         actions.addView(copy, new LinearLayout.LayoutParams(0, dp(54), 1));
         actions.addView(save, new LinearLayout.LayoutParams(0, dp(54), 1));
         root.addView(actions);
 
         clear.setOnClickListener(v -> {
-            clearLocalLog();
             if (masterSwitch.isChecked()) startMonitorService(false, MonitoringService.ACTION_CLEAR);
-            refreshStatusAndLogs();
+            else clearLocalFiles();
+            logView.setText("");
         });
         copy.setOnClickListener(v -> copyLogs());
         save.setOnClickListener(v -> saveLogs());
 
-        TextView label = text("Crash log", 16);
+        TextView label = text("Important events + latest raw log", 16);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(label);
 
-        logView = text("", 12);
+        logView = text("", 11);
         logView.setTypeface(Typeface.MONOSPACE);
         logView.setTextIsSelectable(true);
         ScrollView logScroll = new ScrollView(this);
@@ -283,11 +277,8 @@ public class MainActivity extends Activity {
         Intent service = new Intent(this, MonitoringService.class);
         service.setAction(action);
         service.putExtra(MonitoringService.EXTRA_CLEAR_ON_START, clear);
-        try {
-            startForegroundService(service);
-        } catch (Throwable e) {
-            toast("Could not start background monitoring: " + shortError(e));
-        }
+        try { startForegroundService(service); }
+        catch (Throwable e) { toast("Could not start background monitoring: " + shortError(e)); }
     }
 
     private void findPairingPort() {
@@ -304,7 +295,7 @@ public class MainActivity extends Activity {
                 latch.await(30, TimeUnit.SECONDS);
             } catch (Exception ignored) {
             } finally {
-                try { mdns.stop(); } catch (Exception ignored) {}
+                try { mdns.stop(); } catch (Exception ignored) { }
             }
             int found = port.get();
             runOnUiThread(() -> {
@@ -325,13 +316,9 @@ public class MainActivity extends Activity {
             toast("Enter the pairing port and 6-digit code shown by Wireless debugging.");
             return;
         }
-
         int port;
         try { port = Integer.parseInt(p); }
-        catch (NumberFormatException e) {
-            toast("Invalid pairing port.");
-            return;
-        }
+        catch (NumberFormatException e) { toast("Invalid pairing port."); return; }
 
         status.setText("Pairing…");
         executor.submit(() -> {
@@ -342,9 +329,7 @@ public class MainActivity extends Activity {
                     if (ok) {
                         status.setText("Paired successfully. Crash Monitor will reconnect automatically.");
                         codeInput.setText("");
-                        if (masterSwitch.isChecked()) {
-                            startMonitorService(false, MonitoringService.ACTION_RECONNECT);
-                        }
+                        if (masterSwitch.isChecked()) startMonitorService(false, MonitoringService.ACTION_RECONNECT);
                     } else {
                         status.setText("Pairing failed. Generate a new pairing code and try again.");
                     }
@@ -364,17 +349,35 @@ public class MainActivity extends Activity {
             changingMasterProgrammatically = false;
         }
         String state = prefs.getString(MonitoringService.PREF_STATE,
-                enabled ? "Crash Monitor service starting…" : "Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                enabled ? "Crash Monitor service starting…" : "Master OFF — logging and ADB connection are off. Pairing is saved.");
         status.setText(state);
-        logView.setText(readLogs());
+        logView.setText(readPreview());
         updateMonitoringButtons();
     }
 
-    private String readLogs() {
-        File f = new File(getFilesDir(), MonitoringService.LOG_FILE);
-        if (!f.exists()) return "";
+    private String readPreview() {
+        String important = readTail(new File(getFilesDir(), MonitoringService.IMPORTANT_FILE), PREVIEW_IMPORTANT_BYTES);
+        String raw = readTail(new File(getFilesDir(), MonitoringService.LOG_FILE), PREVIEW_RAW_BYTES);
+        StringBuilder out = new StringBuilder();
+        out.append("=== IMPORTANT EVENTS ===\n");
+        out.append(important.isEmpty() ? "(none detected yet)\n" : important);
+        out.append("\n=== FULL RAW LOG — LATEST ENTRIES ===\n");
+        out.append(raw.isEmpty() ? "(no log data yet)\n" : raw);
+        return out.toString();
+    }
+
+    private String readTail(File f, int maxBytes) {
+        if (!f.exists() || f.length() == 0) return "";
         try (FileInputStream in = new FileInputStream(f)) {
-            byte[] data = new byte[(int) Math.min(f.length(), 1_500_000L)];
+            long length = f.length();
+            int take = (int) Math.min((long) maxBytes, length);
+            long skip = length - take;
+            while (skip > 0) {
+                long n = in.skip(skip);
+                if (n <= 0) break;
+                skip -= n;
+            }
+            byte[] data = new byte[take];
             int off = 0;
             while (off < data.length) {
                 int n = in.read(data, off, data.length - off);
@@ -383,28 +386,48 @@ public class MainActivity extends Activity {
             }
             return new String(data, 0, off, StandardCharsets.UTF_8);
         } catch (Exception e) {
-            return "[Could not read log: " + shortError(e) + "]";
+            return "[Could not read log: " + shortError(e) + "]\n";
         }
-    }
-
-    private void clearLocalLog() {
-        File f = new File(getFilesDir(), MonitoringService.LOG_FILE);
-        if (f.exists()) f.delete();
-        logView.setText("");
     }
 
     private void copyLogs() {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("Crash Monitor log", readLogs()));
-        toast("Crash log copied.");
+        cm.setPrimaryClip(ClipData.newPlainText("Crash Monitor latest log", readPreview()));
+        toast("Latest important events + raw log copied. Use Save full TXT for the complete log.");
     }
 
     private void saveLogs() {
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("text/plain");
-        i.putExtra(Intent.EXTRA_TITLE, "crash-monitor-log.txt");
+        i.putExtra(Intent.EXTRA_TITLE, "crash-monitor-full-log.txt");
         startActivityForResult(i, SAVE_REQUEST);
+    }
+
+    private void writeFileTo(OutputStream out, File f) throws Exception {
+        if (!f.exists() || f.length() == 0) return;
+        try (FileInputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[32 * 1024];
+            int n;
+            while ((n = in.read(buf)) >= 0) if (n > 0) out.write(buf, 0, n);
+        }
+    }
+
+    private void writeFullExport(OutputStream out) throws Exception {
+        out.write("=== IMPORTANT EVENTS (classified) ===\n".getBytes(StandardCharsets.UTF_8));
+        writeFileTo(out, new File(getFilesDir(), MonitoringService.IMPORTANT_FILE));
+        out.write("\n=== FULL RAW ADB-VISIBLE ANDROID LOGCAT ===\n".getBytes(StandardCharsets.UTF_8));
+        writeFileTo(out, new File(getFilesDir(), MonitoringService.LOG_FILE));
+    }
+
+    private void clearLocalFiles() {
+        clearFile(new File(getFilesDir(), MonitoringService.LOG_FILE));
+        clearFile(new File(getFilesDir(), MonitoringService.IMPORTANT_FILE));
+    }
+
+    private void clearFile(File f) {
+        try (FileOutputStream out = new FileOutputStream(f, false)) { out.write(new byte[0]); }
+        catch (Exception ignored) { }
     }
 
     @Override
@@ -414,8 +437,8 @@ public class MainActivity extends Activity {
             Uri uri = data.getData();
             if (uri == null) return;
             try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                if (out != null) out.write(readLogs().getBytes(StandardCharsets.UTF_8));
-                toast("Crash log saved.");
+                if (out != null) writeFullExport(out);
+                toast("Full log saved.");
             } catch (Exception e) {
                 toast("Save failed: " + shortError(e));
             }
@@ -450,7 +473,6 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         handler.removeCallbacks(refreshTask);
         executor.shutdownNow();
-        // Do NOT stop MonitoringService here. Closing/swiping the UI must not stop the service or monitoring state.
         super.onDestroy();
     }
 }
