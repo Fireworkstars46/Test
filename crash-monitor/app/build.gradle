@@ -11,12 +11,29 @@ android {
         minSdk 31
         targetSdk 35
         versionCode 1
-        versionName '1.0'
+        versionName '1.0-permanent'
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv('CRASHMONITOR_KEYSTORE')
+            if (ksPath != null && !ksPath.isEmpty()) {
+                storeFile file(ksPath)
+                storePassword System.getenv('CRASHMONITOR_STORE_PASSWORD')
+                keyAlias System.getenv('CRASHMONITOR_KEY_ALIAS') ?: 'crashmonitor'
+                keyPassword System.getenv('CRASHMONITOR_KEY_PASSWORD')
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+                enableV4Signing false
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
         }
     }
 
