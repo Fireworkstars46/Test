@@ -139,13 +139,19 @@ public class MainActivity extends Activity {
                 startMonitorService(true, MonitoringService.ACTION_START);
                 toast("Master ON — monitoring will keep running when the app is closed.");
             } else {
-                stopService(new Intent(this, MonitoringService.class));
+                Intent stop = new Intent(this, MonitoringService.class);
+                stop.setAction(MonitoringService.ACTION_STOP);
+                try {
+                    startService(stop);
+                } catch (Throwable e) {
+                    stopService(new Intent(this, MonitoringService.class));
+                }
                 getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
                         .edit()
                         .putString(MonitoringService.PREF_STATE,
-                                "Master OFF — monitoring stopped. Pairing is saved.")
+                                "Master OFF — monitoring and ADB connection are off. Pairing is saved.")
                         .apply();
-                status.setText("Master OFF — monitoring stopped. Pairing is saved.");
+                status.setText("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
             }
         });
 
@@ -316,7 +322,7 @@ public class MainActivity extends Activity {
             changingMasterProgrammatically = false;
         }
         String state = prefs.getString(MonitoringService.PREF_STATE,
-                enabled ? "Monitoring service starting…" : "Master OFF — monitoring stopped. Pairing is saved.");
+                enabled ? "Monitoring service starting…" : "Master OFF — monitoring and ADB connection are off. Pairing is saved.");
         status.setText(state);
         logView.setText(readLogs());
     }
