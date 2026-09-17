@@ -27,12 +27,15 @@ import io.github.muntashirakon.adb.AdbStream;
 public class MonitoringService extends Service {
     public static final String ACTION_START = "com.local.crashmonitor.START";
     public static final String ACTION_STOP = "com.local.crashmonitor.STOP";
+    public static final String ACTION_START_MONITORING = "com.local.crashmonitor.START_MONITORING";
+    public static final String ACTION_STOP_MONITORING = "com.local.crashmonitor.STOP_MONITORING";
     public static final String ACTION_RECONNECT = "com.local.crashmonitor.RECONNECT";
     public static final String ACTION_CLEAR = "com.local.crashmonitor.CLEAR";
     public static final String EXTRA_CLEAR_ON_START = "clear_on_start";
 
     public static final String PREFS = "crash_monitor_settings";
     public static final String PREF_MASTER = "master_enabled";
+    public static final String PREF_MONITORING = "monitoring_enabled";
     public static final String PREF_STATE = "service_state";
     public static final String LOG_FILE = "crash-monitor-live.txt";
 
@@ -41,7 +44,8 @@ public class MonitoringService extends Service {
     private static final long MAX_LOG_BYTES = 1_500_000L;
     private static final long KEEP_LOG_BYTES = 1_000_000L;
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService controlExecutor = Executors.newCachedThreadPool();
     private final Object workerLock = new Object();
     private volatile boolean stopRequested;
     private volatile boolean workerRunning;
@@ -70,10 +74,27 @@ public class MonitoringService extends Service {
             return START_NOT_STICKY;
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Monitoring is enabled"));
+        startForeground(NOTIFICATION_ID, buildNotification("Crash Monitor is ready"));
+
+        if (ACTION_START_MONITORING.equals(action)) {
+            prefs.edit().putBoolean(PREF_MONITORING, true).apply();
+            clearOnNextConnect = true;
+            stopRequested = false;
+            closeMonitorStream();
+            setState("Starting crash monitoring…");
+            startWorkerIfNeeded();
+            return START_STICKY;
+        }
+
+        if (ACTION_STOP_MONITORING.equals(action)) {
+            prefs.edit().putBoolean(PREF_MONITORING, false).apply();
+            closeMonitorStream();
+            setState("Ready — monitoring stopped. Master power is still ON.");
+            return START_STICKY;
+        }
 
         if (ACTION_CLEAR.equals(action)) {
-            executor.submit(this::clearAllLogs);
+            controlExecutor.submit(this::clearAllLogs);
             return START_STICKY;
         }
 
@@ -82,9 +103,17 @@ public class MonitoringService extends Service {
 
         if (ACTION_RECONNECT.equals(action)) {
             closeMonitorStream();
+            controlExecutor.submit(this::disconnectForReconnect);
         }
 
-        startWorkerIfNeeded();
+        if (prefs.getBoolean(PREF_MONITORING, true)) {
+            stopRequested = false;
+            startWorkerIfNeeded();
+        } else {
+            setState("Ready — monitoring stopped. Master power is still ON.");
+            controlExecutor.submit(this::ensureConnectedOnce);
+        }
+
         return START_STICKY;
     }
 
@@ -92,14 +121,13 @@ public class MonitoringService extends Service {
         synchronized (workerLock) {
             if (workerRunning) return;
             workerRunning = true;
-            stopRequested = false;
-            executor.submit(this::monitorLoop);
+            workerExecutor.submit(this::monitorLoop);
         }
     }
 
     private void monitorLoop() {
         try {
-            while (!stopRequested && isMasterEnabled()) {
+            while (!stopRequested && isMasterEnabled() && isMonitoringEnabled()) {
                 try {
                     setState("Connecting to Wireless debugging…");
                     AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
@@ -123,19 +151,22 @@ public class MonitoringService extends Service {
                         clearLocalLog();
                     }
 
+                    if (!isMonitoringEnabled()) break;
+
                     setState("Monitoring crashes in background");
                     monitorStream = manager.openStream("shell:logcat -b crash -v threadtime");
                     try (InputStream in = monitorStream.openInputStream();
                          BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
                         String line;
-                        while (!stopRequested && isMasterEnabled() && (line = reader.readLine()) != null) {
+                        while (!stopRequested && isMasterEnabled() && isMonitoringEnabled()
+                                && (line = reader.readLine()) != null) {
                             appendLog(line + "\n");
                         }
                     } finally {
                         closeMonitorStream();
                     }
                 } catch (Throwable e) {
-                    if (!stopRequested && isMasterEnabled()) {
+                    if (!stopRequested && isMasterEnabled() && isMonitoringEnabled()) {
                         setState("Reconnecting after monitor error…");
                         sleepQuietly(2000);
                     }
@@ -146,7 +177,9 @@ public class MonitoringService extends Service {
                 workerRunning = false;
             }
             if (!isMasterEnabled() || stopRequested) {
-                setState("Master OFF — monitoring stopped. Pairing is saved.");
+                setState("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+            } else if (!isMonitoringEnabled()) {
+                setState("Ready — monitoring stopped. Master power is still ON.");
             }
         }
     }
@@ -155,13 +188,45 @@ public class MonitoringService extends Service {
         return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_MASTER, true);
     }
 
+    private boolean isMonitoringEnabled() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_MONITORING, true);
+    }
+
+    private void ensureConnectedOnce() {
+        if (!isMasterEnabled()) return;
+        try {
+            AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
+            if (manager.isConnected()) return;
+            try {
+                manager.autoConnect(this, 10000);
+            } catch (AdbPairingRequiredException ignored) { }
+        } catch (Throwable ignored) { }
+    }
+
+    private void disconnectForReconnect() {
+        if (!isMasterEnabled()) return;
+        try {
+            AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
+            if (manager.isConnected()) manager.disconnect();
+        } catch (Throwable ignored) { }
+
+        if (isMonitoringEnabled()) {
+            stopRequested = false;
+            startWorkerIfNeeded();
+        } else {
+            ensureConnectedOnce();
+            setState("Ready — monitoring stopped. Master power is still ON.");
+        }
+    }
+
     private void clearAllLogs() {
         try {
             AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
             if (manager.isConnected()) clearDeviceCrashBuffer(manager);
         } catch (Throwable ignored) { }
         clearLocalLog();
-        setState("Monitoring crashes in background");
+        if (isMonitoringEnabled()) setState("Monitoring crashes in background");
+        else setState("Ready — monitoring stopped. Master power is still ON.");
     }
 
     private void clearDeviceCrashBuffer(AdbConnectionManager manager) {
@@ -224,7 +289,7 @@ public class MonitoringService extends Service {
             AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
             if (manager.isConnected()) manager.disconnect();
         } catch (Throwable ignored) { }
-        setState("Master OFF — monitoring stopped. Pairing is saved.");
+        setState("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -280,14 +345,15 @@ public class MonitoringService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // Intentionally do nothing. The foreground service remains running when the UI is swiped away.
+        // Keep the foreground service alive when the UI is swiped away.
         super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
         closeMonitorStream();
-        executor.shutdownNow();
+        workerExecutor.shutdownNow();
+        controlExecutor.shutdownNow();
         super.onDestroy();
     }
 
