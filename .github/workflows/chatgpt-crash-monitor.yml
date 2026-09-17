@@ -14,20 +14,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK
+
+      - name: Generate permanent signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS=$(openssl rand -hex 24)
+          echo "CRASHMONITOR_STORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          echo "CRASHMONITOR_KEY_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          echo "CRASHMONITOR_KEY_ALIAS=crashmonitor" >> "$GITHUB_ENV"
+          echo "CRASHMONITOR_KEYSTORE=$GITHUB_WORKSPACE/crash-monitor/CrashMonitor-Permanent-Key.jks" >> "$GITHUB_ENV"
+          keytool -genkeypair \
+            -keystore "$GITHUB_WORKSPACE/crash-monitor/CrashMonitor-Permanent-Key.jks" \
+            -storetype PKCS12 \
+            -alias crashmonitor \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 36500 \
+            -storepass "$PASS" \
+            -keypass "$PASS" \
+            -dname "CN=Crash Monitor Permanent,O=Local,C=US"
+          {
+            echo "Crash Monitor permanent signing key"
+            echo "DO NOT LOSE THIS FILE OR PASSWORD. Future APK updates must use this same key."
+            echo
+            echo "Alias: crashmonitor"
+            echo "Keystore password: $PASS"
+            echo "Key password: $PASS"
+          } > "$GITHUB_WORKSPACE/crash-monitor/CrashMonitor-Key-Info.txt"
+
+      - name: Build permanently signed APK
         working-directory: crash-monitor
-        run: gradle --no-daemon :app:assembleDebug
-      - name: Rename APK
-        run: cp crash-monitor/app/build/outputs/apk/debug/app-debug.apk CrashMonitor.apk
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Prepare files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p permanent-build
+          cp crash-monitor/app/build/outputs/apk/release/app-release.apk permanent-build/CrashMonitor-Permanent.apk
+          cp crash-monitor/CrashMonitor-Permanent-Key.jks permanent-build/
+          cp crash-monitor/CrashMonitor-Key-Info.txt permanent-build/
+          keytool -list -v \
+            -keystore crash-monitor/CrashMonitor-Permanent-Key.jks \
+            -storepass "$CRASHMONITOR_STORE_PASSWORD" \
+            -alias crashmonitor | grep -E "SHA256:|Valid from:" > permanent-build/CrashMonitor-Key-Fingerprint.txt
+
       - uses: actions/upload-artifact@v4
         with:
-          name: CrashMonitor-APK
-          path: CrashMonitor.apk
+          name: CrashMonitor-Permanent-Build
+          path: permanent-build/*
           if-no-files-found: error
