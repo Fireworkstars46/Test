@@ -49,6 +49,8 @@ public class MainActivity extends Activity {
     private EditText portInput;
     private EditText codeInput;
     private Switch masterSwitch;
+    private Button startMonitoringButton;
+    private Button stopMonitoringButton;
     private boolean changingMasterProgrammatically;
 
     private final Runnable refreshTask = new Runnable() {
@@ -76,6 +78,7 @@ public class MainActivity extends Activity {
         }
 
         if (enabled) startMonitorService(false, MonitoringService.ACTION_START);
+        updateMonitoringButtons();
     }
 
     private int dp(int n) {
@@ -121,8 +124,8 @@ public class MainActivity extends Activity {
         root.addView(masterRow);
 
         TextView masterHelp = text(
-                "When ON, monitoring runs as a foreground service even if you close or swipe away this app. " +
-                "It only stops when you turn this setting OFF (or Android is force-stopped). Pairing stays saved.",
+                "Master ON keeps the background service alive even if you close or swipe away the app. " +
+                "Start/Stop below only controls crash monitoring. Master OFF shuts down the service and ADB connection, while keeping pairing saved.",
                 13);
         root.addView(masterHelp);
 
@@ -136,8 +139,8 @@ public class MainActivity extends Activity {
                     .putBoolean(MonitoringService.PREF_MASTER, isChecked)
                     .apply();
             if (isChecked) {
-                startMonitorService(true, MonitoringService.ACTION_START);
-                toast("Master ON — monitoring will keep running when the app is closed.");
+                startMonitorService(false, MonitoringService.ACTION_START);
+                toast("Master ON — the background service stays running when the app is closed.");
             } else {
                 Intent stop = new Intent(this, MonitoringService.class);
                 stop.setAction(MonitoringService.ACTION_STOP);
@@ -153,6 +156,7 @@ public class MainActivity extends Activity {
                         .apply();
                 status.setText("Master OFF — monitoring and ADB connection are off. Pairing is saved.");
             }
+            updateMonitoringButtons();
         });
 
         Button openWireless = button("Open Developer options / Wireless debugging");
@@ -203,6 +207,35 @@ public class MainActivity extends Activity {
         });
         root.addView(reconnect);
 
+        LinearLayout monitorRow = new LinearLayout(this);
+        monitorRow.setOrientation(LinearLayout.HORIZONTAL);
+        startMonitoringButton = button("Start monitoring");
+        stopMonitoringButton = button("Stop");
+        monitorRow.addView(startMonitoringButton, new LinearLayout.LayoutParams(0, dp(58), 1));
+        monitorRow.addView(stopMonitoringButton, new LinearLayout.LayoutParams(0, dp(58), 1));
+        root.addView(monitorRow);
+
+        startMonitoringButton.setOnClickListener(v -> {
+            if (!masterSwitch.isChecked()) {
+                toast("Turn Master power ON first.");
+                return;
+            }
+            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
+                    .edit().putBoolean(MonitoringService.PREF_MONITORING, true).apply();
+            startMonitorService(true, MonitoringService.ACTION_START_MONITORING);
+            status.setText("Starting crash monitoring…");
+            updateMonitoringButtons();
+        });
+
+        stopMonitoringButton.setOnClickListener(v -> {
+            if (!masterSwitch.isChecked()) return;
+            getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE)
+                    .edit().putBoolean(MonitoringService.PREF_MONITORING, false).apply();
+            startMonitorService(false, MonitoringService.ACTION_STOP_MONITORING);
+            status.setText("Ready — monitoring stopped. Master power is still ON.");
+            updateMonitoringButtons();
+        });
+
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         Button clear = button("Clear");
@@ -237,6 +270,15 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    private void updateMonitoringButtons() {
+        if (startMonitoringButton == null || stopMonitoringButton == null || masterSwitch == null) return;
+        SharedPreferences prefs = getSharedPreferences(MonitoringService.PREFS, MODE_PRIVATE);
+        boolean master = prefs.getBoolean(MonitoringService.PREF_MASTER, true);
+        boolean monitoring = prefs.getBoolean(MonitoringService.PREF_MONITORING, true);
+        startMonitoringButton.setEnabled(master && !monitoring);
+        stopMonitoringButton.setEnabled(master && monitoring);
+    }
+
     private void startMonitorService(boolean clear, String action) {
         Intent service = new Intent(this, MonitoringService.class);
         service.setAction(action);
@@ -262,7 +304,7 @@ public class MainActivity extends Activity {
                 latch.await(30, TimeUnit.SECONDS);
             } catch (Exception ignored) {
             } finally {
-                try { mdns.stop(); } catch (Exception ignored) { }
+                try { mdns.stop(); } catch (Exception ignored) {}
             }
             int found = port.get();
             runOnUiThread(() -> {
@@ -298,7 +340,7 @@ public class MainActivity extends Activity {
                 boolean ok = manager.pair(AndroidUtils.getHostIpAddress(this), port, code);
                 runOnUiThread(() -> {
                     if (ok) {
-                        status.setText("Paired successfully. Monitoring will connect automatically.");
+                        status.setText("Paired successfully. Crash Monitor will reconnect automatically.");
                         codeInput.setText("");
                         if (masterSwitch.isChecked()) {
                             startMonitorService(false, MonitoringService.ACTION_RECONNECT);
@@ -322,9 +364,10 @@ public class MainActivity extends Activity {
             changingMasterProgrammatically = false;
         }
         String state = prefs.getString(MonitoringService.PREF_STATE,
-                enabled ? "Monitoring service starting…" : "Master OFF — monitoring and ADB connection are off. Pairing is saved.");
+                enabled ? "Crash Monitor service starting…" : "Master OFF — monitoring and ADB connection are off. Pairing is saved.");
         status.setText(state);
         logView.setText(readLogs());
+        updateMonitoringButtons();
     }
 
     private String readLogs() {
@@ -407,7 +450,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         handler.removeCallbacks(refreshTask);
         executor.shutdownNow();
-        // Do NOT stop MonitoringService here. Closing/swiping the UI must not stop monitoring.
+        // Do NOT stop MonitoringService here. Closing/swiping the UI must not stop the service or monitoring state.
         super.onDestroy();
     }
 }
