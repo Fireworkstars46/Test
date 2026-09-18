@@ -801,7 +801,7 @@ public class MainActivity extends Activity {
         String flat = component.getPackageName() + "/" + component.getClassName();
         String command = show
                 ? "pm enable --user 0 " + flat
-                : "pm disable-user --user 0 " + flat;
+                : "pm disable --user 0 " + flat;
 
         Throwable last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
