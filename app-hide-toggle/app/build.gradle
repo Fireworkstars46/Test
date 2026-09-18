@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 11
-        versionName '2.3.6-inline-buttons'
+        versionCode 12
+        versionName '2.3.7-no-jump'
     }
 
     packaging {
