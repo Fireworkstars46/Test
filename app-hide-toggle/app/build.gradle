@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 14
-        versionName '2.3.9-stable-row-actions'
+        versionCode 15
+        versionName '2.4-interactive-adb-stable'
     }
 
     packaging {
