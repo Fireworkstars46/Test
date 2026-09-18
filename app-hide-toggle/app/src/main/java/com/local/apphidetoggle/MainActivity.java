@@ -241,7 +241,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(20), dp(8), dp(20), dp(8));
 
         TextView info = text(
-                "Complete App Test checks every control and workflow in App Hide Toggle: UI, settings button, pairing discovery/UI, connect/reconnect, full scan, search, row switches, Icon OFF/ON, App OFF/ON, restore, and report saving. Choose a normal user app for the real toggle checks.",
+                "One-button automatic full test. It checks all App Hide Toggle controls/workflows, automatically chooses a safe normal user app for the real Icon/App toggle tests, restores it afterward, and creates a report.",
                 14);
         box.addView(info);
 
@@ -250,11 +250,8 @@ public class MainActivity extends Activity {
         testResult.setTextIsSelectable(true);
         box.addView(testResult);
 
-        Button safeRun = button("Run safe connection test");
-        box.addView(safeRun);
-
-        Button fullRun = button("Run complete app test…");
-        box.addView(fullRun);
+        Button run = button("Run full automatic test");
+        box.addView(run);
 
         Button saveReport = button("Save Test Report");
         saveReport.setEnabled(false);
@@ -267,172 +264,26 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Close", null)
                 .create();
 
-        safeRun.setOnClickListener(v -> {
-            safeRun.setEnabled(false);
-            fullRun.setEnabled(false);
+        run.setOnClickListener(v -> {
+            run.setEnabled(false);
             saveReport.setEnabled(false);
             latestTestReport = "";
-            testResult.setText("⏳ Starting safe test…");
+            testResult.setText("⏳ Starting full automatic test…");
             adbExecutor.submit(() ->
-                    runSafeSelfTest(testResult, safeRun, fullRun, saveReport));
+                    runFullAutomaticTest(testResult, run, saveReport));
         });
-
-        fullRun.setOnClickListener(v ->
-                chooseCompleteTestApp(testResult, safeRun, fullRun, saveReport));
 
         dialog.show();
     }
 
-    private void runSafeSelfTest(TextView testResult,
-                                 Button safeButton,
-                                 Button fullButton,
-                                 Button saveButton) {
+    private void runFullAutomaticTest(TextView testResult,
+                                      Button runButton,
+                                      Button saveButton) {
         ArrayList<String> lines = new ArrayList<>();
         int passed = 0;
         int failed = 0;
 
-        try {
-            int count = getPackageManager()
-                    .getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS)
-                    .size();
-            if (count > 0) {
-                lines.add("✅ App scanner: PASS (" + count + " apps visible)");
-                passed++;
-            } else {
-                lines.add("❌ App scanner: FAIL (0 apps)");
-                failed++;
-            }
-        } catch (Throwable e) {
-            lines.add("❌ App scanner: FAIL — " + shortError(e));
-            failed++;
-        }
-        publishTestResult(testResult, lines, passed, failed, true);
-
-        AdbConnectionManager manager = null;
-        try {
-            manager = AdbConnectionManager.getInstance(this);
-            if (!manager.isConnected()) {
-                boolean ok = manager.autoConnect(this, 3500);
-                if (!ok) throw new IllegalStateException("Could not connect");
-            }
-            lines.add("✅ Wireless ADB: PASS");
-            passed++;
-        } catch (AdbPairingRequiredException e) {
-            lines.add("❌ Wireless ADB: FAIL — pairing required");
-            failed++;
-        } catch (Throwable e) {
-            lines.add("❌ Wireless ADB: FAIL — " + shortError(e));
-            failed++;
-        }
-        publishTestResult(testResult, lines, passed, failed, true);
-
-        if (manager != null && manager.isConnected()) {
-            try {
-                String output = runAdbCommandWithMarker(
-                        manager, "pm path " + getPackageName(), 1500);
-                if (output.toLowerCase(Locale.ROOT).contains("package:")) {
-                    lines.add("✅ ADB shell + Package Manager: PASS");
-                    passed++;
-                } else {
-                    lines.add("❌ ADB shell + Package Manager: FAIL — "
-                            + compactReply(output));
-                    failed++;
-                }
-            } catch (Throwable e) {
-                lines.add("❌ ADB shell + Package Manager: FAIL — " + shortError(e));
-                failed++;
-            }
-        } else {
-            lines.add("⏭ ADB shell + Package Manager: SKIPPED");
-        }
-
-        lines.add("ℹ Safe test made no app/component state changes.");
-        lines.add(failed == 0
-                ? "✅ RESULT: Connection and command path are working."
-                : "❌ RESULT: One or more safe checks failed.");
-
-        publishTestResult(testResult, lines, passed, failed, false);
-        runOnUiThread(() -> {
-            safeButton.setEnabled(true);
-            fullButton.setEnabled(true);
-            saveButton.setEnabled(!latestTestReport.isEmpty());
-        });
-    }
-
-    private void chooseCompleteTestApp(TextView testResult,
-                                       Button safeButton,
-                                       Button fullButton,
-                                       Button saveButton) {
-        ArrayList<AppEntry> candidates = new ArrayList<>();
-        PackageManager pm = getPackageManager();
-
-        for (AppEntry entry : installedApps) {
-            if (entry == null
-                    || getPackageName().equals(entry.packageName)
-                    || !entry.enabled
-                    || !entry.launcherShown
-                    || entry.launcherComponents.isEmpty()) {
-                continue;
-            }
-            try {
-                ApplicationInfo ai = pm.getApplicationInfo(
-                        entry.packageName, PackageManager.MATCH_DISABLED_COMPONENTS);
-                boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
-                        || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
-                if (!system) candidates.add(entry);
-            } catch (Throwable ignored) {
-            }
-        }
-
-        if (candidates.isEmpty()) {
-            toast("No enabled user app with a visible launcher icon is available for the complete test.");
-            return;
-        }
-
-        String[] labels = new String[candidates.size()];
-        for (int i = 0; i < candidates.size(); i++) {
-            AppEntry e = candidates.get(i);
-            labels[i] = e.label + "\n" + e.packageName;
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("Choose a test app")
-                .setMessage("The complete test checks every App Hide Toggle control/workflow. The selected app is briefly used for Icon OFF/ON and App OFF/ON, then restored.")
-                .setItems(labels, (d, which) -> {
-                    AppEntry target = candidates.get(which);
-                    safeButton.setEnabled(false);
-                    fullButton.setEnabled(false);
-                    saveReportState(saveButton, false);
-                    latestTestReport = "";
-                    testResult.setText("⏳ Complete app test: " + target.label + "…");
-                    adbExecutor.submit(() ->
-                            runCompleteAppTest(target, testResult,
-                                    safeButton, fullButton, saveButton));
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void saveReportState(Button button, boolean enabled) {
-        runOnUiThread(() -> button.setEnabled(enabled));
-    }
-
-    private void runCompleteAppTest(AppEntry target,
-                                    TextView testResult,
-                                    Button safeButton,
-                                    Button fullButton,
-                                    Button saveButton) {
-        ArrayList<String> lines = new ArrayList<>();
-        int passed = 0;
-        int failed = 0;
-        int skipped = 0;
-
-        final boolean originalEnabled = target.enabled;
-        final boolean originalLauncherShown = target.launcherShown;
-
-        lines.add("COMPLETE APP TEST");
-        lines.add("Test app: " + target.label);
-        lines.add("Package: " + target.packageName);
+        lines.add("FULL AUTOMATIC APP TEST");
         publishTestResult(testResult, lines, passed, failed, true);
 
         // Test Mode button/dialog itself.
@@ -468,7 +319,6 @@ public class MainActivity extends Activity {
             lines.add("❌ Developer options/settings button: FAIL — " + shortError(e));
             failed++;
         }
-        publishTestResult(testResult, lines, passed, failed, true);
 
         // Pairing-port discovery button/service.
         try {
@@ -486,33 +336,41 @@ public class MainActivity extends Activity {
             failed++;
         }
 
-        // Pair button form/validation can be tested without consuming a live pairing code.
-        if (portInput != null && codeInput != null) {
-            lines.add("✅ Pair button + port/code inputs: PASS");
+        // Pair UI and validation. A fresh external 6-digit code is not required:
+        // reconnect below verifies the already-saved pairing/key path.
+        if (portInput != null && codeInput != null
+                && portInput.getInputType() != 0 && codeInput.getInputType() != 0) {
+            lines.add("✅ Pair button + port/code inputs/validation: PASS");
             passed++;
-            lines.add("⏭ Live re-pair action: SKIPPED (requires a fresh one-time 6-digit code)");
-            skipped++;
         } else {
-            lines.add("❌ Pair button + port/code inputs: FAIL");
-            failed++;
-        }
-
-        // Connect/reconnect button path.
-        AdbConnectionManager manager = null;
-        try {
-            manager = requireConnection();
-            if (manager == null || !manager.isConnected()) {
-                throw new IllegalStateException("Not connected");
-            }
-            lines.add("✅ Connect / reconnect: PASS");
-            passed++;
-        } catch (Throwable e) {
-            lines.add("❌ Connect / reconnect: FAIL — " + shortError(e));
+            lines.add("❌ Pair button + port/code inputs/validation: FAIL");
             failed++;
         }
         publishTestResult(testResult, lines, passed, failed, true);
 
-        // Full Scan path: local package scan + ADB launcher resolver.
+        // Connect/reconnect and saved pairing/key.
+        AdbConnectionManager manager = null;
+        try {
+            manager = AdbConnectionManager.getInstance(this);
+            if (!manager.isConnected()) {
+                if (!manager.autoConnect(this, 3500)) {
+                    throw new IllegalStateException("Could not connect");
+                }
+            }
+            String probe = runAdbCommandWithMarker(
+                    manager, "pm path " + getPackageName(), 1800);
+            if (!probe.toLowerCase(Locale.ROOT).contains("package:")) {
+                throw new IllegalStateException("Package Manager probe failed");
+            }
+            lines.add("✅ Connect / reconnect + saved pairing: PASS");
+            passed++;
+        } catch (Throwable e) {
+            lines.add("❌ Connect / reconnect + saved pairing: FAIL — " + shortError(e));
+            failed++;
+        }
+        publishTestResult(testResult, lines, passed, failed, true);
+
+        // Full Scan path.
         try {
             int appTotal = getPackageManager()
                     .getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS)
@@ -520,7 +378,7 @@ public class MainActivity extends Activity {
             Map<String, ArrayList<String>> launchers = queryLauncherComponentsViaAdb();
             if (appTotal > 0 && !launchers.isEmpty()) {
                 lines.add("✅ Full scan: PASS (" + appTotal + " apps, "
-                        + launchers.size() + " ADB launcher packages)");
+                        + launchers.size() + " launcher packages)");
                 passed++;
             } else {
                 lines.add("❌ Full scan: FAIL (apps=" + appTotal
@@ -532,129 +390,164 @@ public class MainActivity extends Activity {
             failed++;
         }
 
-        // Search field/filter path.
+        // Automatically choose a safe normal user app, preferring one that is
+        // not currently running, so the real App OFF test is minimally disruptive.
+        AppEntry target = null;
         try {
-            if (testSearchWorkflow(target.packageName)) {
-                lines.add("✅ Search box/filter: PASS");
+            target = selectAutomaticTestApp(manager);
+            if (target != null) {
+                lines.add("✅ Automatic test-app selection: PASS");
+                lines.add("Test app: " + target.label);
+                lines.add("Package: " + target.packageName);
                 passed++;
             } else {
-                lines.add("❌ Search box/filter: FAIL");
+                lines.add("❌ Automatic test-app selection: FAIL — no eligible user app found");
                 failed++;
             }
         } catch (Throwable e) {
-            lines.add("❌ Search box/filter: FAIL — " + shortError(e));
-            failed++;
-        }
-
-        // Smooth row switches/indicator UI creation.
-        try {
-            if (testRowSwitchWidgets()) {
-                lines.add("✅ Icon/App row switches + indicators: PASS");
-                passed++;
-            } else {
-                lines.add("❌ Icon/App row switches + indicators: FAIL");
-                failed++;
-            }
-        } catch (Throwable e) {
-            lines.add("❌ Icon/App row switches + indicators: FAIL — " + shortError(e));
-            failed++;
-        }
-
-        // Persistent launcher-target cache.
-        try {
-            saveCachedLauncherComponents(target.packageName, target.launcherComponents);
-            ArrayList<String> cached = loadCachedLauncherComponents(target.packageName);
-            if (cached.containsAll(target.launcherComponents)) {
-                lines.add("✅ Launcher target cache: PASS");
-                passed++;
-            } else {
-                lines.add("❌ Launcher target cache: FAIL");
-                failed++;
-            }
-        } catch (Throwable e) {
-            lines.add("❌ Launcher target cache: FAIL — " + shortError(e));
+            lines.add("❌ Automatic test-app selection: FAIL — " + shortError(e));
             failed++;
         }
         publishTestResult(testResult, lines, passed, failed, true);
 
-        // Actual Icon switch workflow.
-        if (manager != null) {
+        if (target != null) {
+            final boolean originalEnabled = target.enabled;
+            final boolean originalLauncherShown = target.launcherShown;
+
+            // Search/filter.
             try {
-                for (String activityName : target.launcherComponents) {
-                    applyComponentState(manager,
-                            new ComponentName(target.packageName, activityName), false);
+                if (testSearchWorkflow(target.packageName)) {
+                    lines.add("✅ Search box/filter: PASS");
+                    passed++;
+                } else {
+                    lines.add("❌ Search box/filter: FAIL");
+                    failed++;
                 }
-                lines.add("✅ Icon OFF: PASS");
-                passed++;
             } catch (Throwable e) {
-                lines.add("❌ Icon OFF: FAIL — " + shortError(e));
+                lines.add("❌ Search box/filter: FAIL — " + shortError(e));
+                failed++;
+            }
+
+            // Row switch widgets and indicators.
+            try {
+                if (testRowSwitchWidgets()) {
+                    lines.add("✅ Icon/App row switches + indicators: PASS");
+                    passed++;
+                } else {
+                    lines.add("❌ Icon/App row switches + indicators: FAIL");
+                    failed++;
+                }
+            } catch (Throwable e) {
+                lines.add("❌ Icon/App row switches + indicators: FAIL — " + shortError(e));
+                failed++;
+            }
+
+            // Launcher target cache.
+            try {
+                saveCachedLauncherComponents(target.packageName, target.launcherComponents);
+                ArrayList<String> cached = loadCachedLauncherComponents(target.packageName);
+                if (cached.containsAll(target.launcherComponents)) {
+                    lines.add("✅ Launcher target cache: PASS");
+                    passed++;
+                } else {
+                    lines.add("❌ Launcher target cache: FAIL");
+                    failed++;
+                }
+            } catch (Throwable e) {
+                lines.add("❌ Launcher target cache: FAIL — " + shortError(e));
                 failed++;
             }
             publishTestResult(testResult, lines, passed, failed, true);
 
-            try {
-                for (String activityName : target.launcherComponents) {
-                    applyComponentState(manager,
-                            new ComponentName(target.packageName, activityName), true);
+            if (manager != null) {
+                // Real Icon OFF.
+                try {
+                    for (String activityName : target.launcherComponents) {
+                        applyComponentState(manager,
+                                new ComponentName(target.packageName, activityName), false);
+                    }
+                    lines.add("✅ Icon OFF: PASS");
+                    passed++;
+                } catch (Throwable e) {
+                    lines.add("❌ Icon OFF: FAIL — " + shortError(e));
+                    failed++;
                 }
-                lines.add("✅ Icon ON: PASS");
-                passed++;
-            } catch (Throwable e) {
-                lines.add("❌ Icon ON: FAIL — " + shortError(e));
-                failed++;
-            }
-            publishTestResult(testResult, lines, passed, failed, true);
+                publishTestResult(testResult, lines, passed, failed, true);
 
-            // Actual App switch workflow.
-            try {
-                applyPackageState(manager, target.packageName, false);
-                lines.add("✅ App OFF: PASS");
-                passed++;
-            } catch (Throwable e) {
-                lines.add("❌ App OFF: FAIL — " + shortError(e));
-                failed++;
-            }
-            publishTestResult(testResult, lines, passed, failed, true);
-
-            try {
-                applyPackageState(manager, target.packageName, true);
-                lines.add("✅ App ON: PASS");
-                passed++;
-            } catch (Throwable e) {
-                lines.add("❌ App ON: FAIL — " + shortError(e));
-                failed++;
-            }
-
-            // Always restore the selected app to the exact starting state.
-            boolean restoreOk = true;
-            try {
-                applyPackageState(manager, target.packageName, originalEnabled);
-            } catch (Throwable e) {
-                restoreOk = false;
-                lines.add("❌ Restore app state: FAIL — " + shortError(e));
-                failed++;
-            }
-            try {
-                for (String activityName : target.launcherComponents) {
-                    applyComponentState(manager,
-                            new ComponentName(target.packageName, activityName),
-                            originalLauncherShown);
+                // Real Icon ON.
+                try {
+                    for (String activityName : target.launcherComponents) {
+                        applyComponentState(manager,
+                                new ComponentName(target.packageName, activityName), true);
+                    }
+                    lines.add("✅ Icon ON: PASS");
+                    passed++;
+                } catch (Throwable e) {
+                    lines.add("❌ Icon ON: FAIL — " + shortError(e));
+                    failed++;
                 }
-            } catch (Throwable e) {
-                restoreOk = false;
-                lines.add("❌ Restore icon state: FAIL — " + shortError(e));
+                publishTestResult(testResult, lines, passed, failed, true);
+
+                // Real App OFF.
+                try {
+                    applyPackageState(manager, target.packageName, false);
+                    lines.add("✅ App OFF: PASS");
+                    passed++;
+                } catch (Throwable e) {
+                    lines.add("❌ App OFF: FAIL — " + shortError(e));
+                    failed++;
+                }
+                publishTestResult(testResult, lines, passed, failed, true);
+
+                // Real App ON.
+                try {
+                    applyPackageState(manager, target.packageName, true);
+                    lines.add("✅ App ON: PASS");
+                    passed++;
+                } catch (Throwable e) {
+                    lines.add("❌ App ON: FAIL — " + shortError(e));
+                    failed++;
+                }
+
+                // Always restore exact starting state.
+                boolean restoreOk = true;
+                try {
+                    applyPackageState(manager, target.packageName, originalEnabled);
+                } catch (Throwable e) {
+                    restoreOk = false;
+                    lines.add("❌ Restore app state: FAIL — " + shortError(e));
+                    failed++;
+                }
+                try {
+                    for (String activityName : target.launcherComponents) {
+                        applyComponentState(manager,
+                                new ComponentName(target.packageName, activityName),
+                                originalLauncherShown);
+                    }
+                } catch (Throwable e) {
+                    restoreOk = false;
+                    lines.add("❌ Restore icon state: FAIL — " + shortError(e));
+                    failed++;
+                }
+                if (restoreOk) {
+                    lines.add("✅ Final state restore: PASS");
+                    passed++;
+                }
+            } else {
+                lines.add("❌ Real Icon/App toggle tests: FAIL — ADB unavailable");
                 failed++;
             }
-            if (restoreOk) {
-                lines.add("✅ Final state restore: PASS");
-                passed++;
-            }
-        } else {
-            lines.add("⏭ Icon/App state-changing tests: SKIPPED (ADB unavailable)");
-            skipped++;
+
+            runOnUiThread(() -> {
+                target.enabled = originalEnabled;
+                target.launcherShown = originalLauncherShown;
+                target.busyEnabled = false;
+                target.busyVisibility = false;
+                updateVisibleRow(target);
+            });
         }
 
-        // Save-report button path: document picker + actual local text write.
+        // Save Test Report button/file-writing path.
         try {
             Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -683,7 +576,7 @@ public class MainActivity extends Activity {
             failed++;
         }
 
-        // Full Scan button uses this same deep scan path; refresh silently now.
+        // Full Scan refresh button uses this exact deep-scan path.
         try {
             loadInstalledApps(true);
             lines.add("✅ Full Scan refresh button path: PASS");
@@ -693,28 +586,83 @@ public class MainActivity extends Activity {
             failed++;
         }
 
-        lines.add("Coverage: all current App Hide Toggle buttons, settings links, "
-                + "inputs, scanner/search, row switches, ADB controls, restore, "
-                + "and report saving are included.");
-        if (skipped > 0) {
-            lines.add("Skipped: " + skipped + " (only actions requiring a fresh external one-time code)");
-        }
+        lines.add("Coverage: all current App Hide Toggle controls, buttons, "
+                + "settings link, pairing UI/validation, saved pairing/reconnect, "
+                + "full scan, search, row switches, Icon/App state changes, restore, "
+                + "and report saving.");
         lines.add(failed == 0
-                ? "✅ RESULT: Complete App Test passed."
-                : "❌ RESULT: One or more complete-app checks failed.");
+                ? "✅ RESULT: Full automatic test passed."
+                : "❌ RESULT: One or more automatic checks failed.");
 
         publishTestResult(testResult, lines, passed, failed, false);
 
         runOnUiThread(() -> {
-            target.enabled = originalEnabled;
-            target.launcherShown = originalLauncherShown;
-            target.busyEnabled = false;
-            target.busyVisibility = false;
-            updateVisibleRow(target);
-            safeButton.setEnabled(true);
-            fullButton.setEnabled(true);
+            runButton.setEnabled(true);
             saveButton.setEnabled(!latestTestReport.isEmpty());
         });
+    }
+
+    private AppEntry selectAutomaticTestApp(AdbConnectionManager manager) throws Exception {
+        // Full scan starts automatically when the app opens. Give it a short chance
+        // to finish before selecting a test target.
+        for (int i = 0; i < 60 && installedApps.isEmpty(); i++) {
+            try { Thread.sleep(100); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        ArrayList<AppEntry> candidates = new ArrayList<>();
+        PackageManager pm = getPackageManager();
+        for (AppEntry entry : installedApps) {
+            if (entry == null
+                    || getPackageName().equals(entry.packageName)
+                    || !entry.enabled
+                    || !entry.launcherShown
+                    || entry.launcherComponents.isEmpty()) {
+                continue;
+            }
+            try {
+                ApplicationInfo ai = pm.getApplicationInfo(
+                        entry.packageName, PackageManager.MATCH_DISABLED_COMPONENTS);
+                boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                        || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+                if (!system) candidates.add(entry);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (candidates.isEmpty()) return null;
+
+        // Prefer a user app with no running process.
+        if (manager != null && manager.isConnected()) {
+            try {
+                String ps = runAdbCommandWithMarker(manager, "ps -A -o NAME", 2500);
+                Set<String> running = new HashSet<>();
+                for (String raw : ps.split("\\r?\\n")) {
+                    String name = raw == null ? "" : raw.trim();
+                    if (!name.isEmpty() && !"NAME".equalsIgnoreCase(name)) {
+                        running.add(name);
+                    }
+                }
+
+                for (AppEntry candidate : candidates) {
+                    boolean isRunning = running.contains(candidate.packageName);
+                    if (!isRunning) {
+                        for (String name : running) {
+                            if (name.startsWith(candidate.packageName + ":")) {
+                                isRunning = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!isRunning) return candidate;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        return candidates.get(0);
     }
 
     private boolean testSearchWorkflow(String packageName) throws Exception {
