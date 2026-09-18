@@ -395,10 +395,11 @@ public class MainActivity extends Activity {
         AppEntry target = null;
         try {
             target = selectAutomaticTestApp(manager);
-            if (target != null) {
+            final AppEntry selectedTarget = target;
+        if (selectedTarget != null) {
                 lines.add("✅ Automatic test-app selection: PASS");
-                lines.add("Test app: " + target.label);
-                lines.add("Package: " + target.packageName);
+                lines.add("Test app: " + selectedTarget.label);
+                lines.add("Package: " + selectedTarget.packageName);
                 passed++;
             } else {
                 lines.add("❌ Automatic test-app selection: FAIL — no eligible user app found");
@@ -411,12 +412,12 @@ public class MainActivity extends Activity {
         publishTestResult(testResult, lines, passed, failed, true);
 
         if (target != null) {
-            final boolean originalEnabled = target.enabled;
-            final boolean originalLauncherShown = target.launcherShown;
+            final boolean originalEnabled = selectedTarget.enabled;
+            final boolean originalLauncherShown = selectedTarget.launcherShown;
 
             // Search/filter.
             try {
-                if (testSearchWorkflow(target.packageName)) {
+                if (testSearchWorkflow(selectedTarget.packageName)) {
                     lines.add("✅ Search box/filter: PASS");
                     passed++;
                 } else {
@@ -444,9 +445,9 @@ public class MainActivity extends Activity {
 
             // Launcher target cache.
             try {
-                saveCachedLauncherComponents(target.packageName, target.launcherComponents);
-                ArrayList<String> cached = loadCachedLauncherComponents(target.packageName);
-                if (cached.containsAll(target.launcherComponents)) {
+                saveCachedLauncherComponents(selectedTarget.packageName, selectedTarget.launcherComponents);
+                ArrayList<String> cached = loadCachedLauncherComponents(selectedTarget.packageName);
+                if (cached.containsAll(selectedTarget.launcherComponents)) {
                     lines.add("✅ Launcher target cache: PASS");
                     passed++;
                 } else {
@@ -462,9 +463,9 @@ public class MainActivity extends Activity {
             if (manager != null) {
                 // Real Icon OFF.
                 try {
-                    for (String activityName : target.launcherComponents) {
+                    for (String activityName : selectedTarget.launcherComponents) {
                         applyComponentState(manager,
-                                new ComponentName(target.packageName, activityName), false);
+                                new ComponentName(selectedTarget.packageName, activityName), false);
                     }
                     lines.add("✅ Icon OFF: PASS");
                     passed++;
@@ -476,9 +477,9 @@ public class MainActivity extends Activity {
 
                 // Real Icon ON.
                 try {
-                    for (String activityName : target.launcherComponents) {
+                    for (String activityName : selectedTarget.launcherComponents) {
                         applyComponentState(manager,
-                                new ComponentName(target.packageName, activityName), true);
+                                new ComponentName(selectedTarget.packageName, activityName), true);
                     }
                     lines.add("✅ Icon ON: PASS");
                     passed++;
@@ -490,7 +491,7 @@ public class MainActivity extends Activity {
 
                 // Real App OFF.
                 try {
-                    applyPackageState(manager, target.packageName, false);
+                    applyPackageState(manager, selectedTarget.packageName, false);
                     lines.add("✅ App OFF: PASS");
                     passed++;
                 } catch (Throwable e) {
@@ -501,7 +502,7 @@ public class MainActivity extends Activity {
 
                 // Real App ON.
                 try {
-                    applyPackageState(manager, target.packageName, true);
+                    applyPackageState(manager, selectedTarget.packageName, true);
                     lines.add("✅ App ON: PASS");
                     passed++;
                 } catch (Throwable e) {
@@ -512,16 +513,16 @@ public class MainActivity extends Activity {
                 // Always restore exact starting state.
                 boolean restoreOk = true;
                 try {
-                    applyPackageState(manager, target.packageName, originalEnabled);
+                    applyPackageState(manager, selectedTarget.packageName, originalEnabled);
                 } catch (Throwable e) {
                     restoreOk = false;
                     lines.add("❌ Restore app state: FAIL — " + shortError(e));
                     failed++;
                 }
                 try {
-                    for (String activityName : target.launcherComponents) {
+                    for (String activityName : selectedTarget.launcherComponents) {
                         applyComponentState(manager,
-                                new ComponentName(target.packageName, activityName),
+                                new ComponentName(selectedTarget.packageName, activityName),
                                 originalLauncherShown);
                     }
                 } catch (Throwable e) {
@@ -539,10 +540,10 @@ public class MainActivity extends Activity {
             }
 
             runOnUiThread(() -> {
-                target.enabled = originalEnabled;
-                target.launcherShown = originalLauncherShown;
-                target.busyEnabled = false;
-                target.busyVisibility = false;
+                selectedTarget.enabled = originalEnabled;
+                selectedTarget.launcherShown = originalLauncherShown;
+                selectedTarget.busyEnabled = false;
+                selectedTarget.busyVisibility = false;
                 updateVisibleRow(target);
             });
         }
