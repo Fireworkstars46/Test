@@ -98,7 +98,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         root.addView(text(
-                "Pair once with Android Wireless debugging. Installed apps are scanned automatically below. Tap an app in the list, then hide/disable or show/enable it for user 0.",
+                "Pair once with Android Wireless debugging. Installed apps are scanned automatically below. Tap an app in the list, then hide it or show it for user 0.",
                 14));
 
         status = text("Not connected", 15);
@@ -200,13 +200,13 @@ public class MainActivity extends Activity {
         root.addView(selectedApp);
 
         root.addView(text(
-                "Warning: disabling Settings, One UI Home, System UI, or other core packages can make the phone difficult to use. This app refuses to disable itself.",
+                "Warning: hiding Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide itself.",
                 13));
 
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button hide = button("HIDE / DISABLE");
-        Button show = button("SHOW / ENABLE");
+        Button hide = button("Hide app");
+        Button show = button("Show app");
         actionRow.addView(hide, new LinearLayout.LayoutParams(0, dp(60), 1));
         actionRow.addView(show, new LinearLayout.LayoutParams(0, dp(60), 1));
         root.addView(actionRow);
@@ -308,7 +308,7 @@ public class MainActivity extends Activity {
         for (AppEntry entry : installedApps) {
             if (entry.packageName.equals(selectedPackage)) {
                 selectedApp.setText("Selected: " + entry.label + " — "
-                        + (entry.enabled ? "Enabled" : "Disabled")
+                        + (entry.enabled ? "Visible" : "Hidden")
                         + "\n" + entry.packageName);
                 return;
             }
@@ -412,12 +412,12 @@ public class MainActivity extends Activity {
         }
 
         if (getPackageName().equals(pkg) && !enable) {
-            toast("App Hide Toggle will not disable itself.");
+            toast("App Hide Toggle will not hide itself.");
             return;
         }
 
         result.setText("");
-        setStatus((enable ? "Enabling " : "Disabling ") + pkg + "…");
+        setStatus((enable ? "Showing " : "Hiding ") + pkg + "…");
         executor.submit(() -> executePackageCommand(pkg, enable));
     }
 
@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
 
             final String finalOutput = output;
             runOnUiThread(() -> result.setText(finalOutput));
-            setStatus(enable ? "Enabled / shown: " + pkg : "Disabled / hidden: " + pkg);
+            setStatus(enable ? "Visible: " + pkg : "Hidden: " + pkg);
             loadInstalledApps();
         } catch (Throwable e) {
             String msg = shortError(e);
@@ -560,7 +560,7 @@ public class MainActivity extends Activity {
             LinearLayout texts = new LinearLayout(MainActivity.this);
             texts.setOrientation(LinearLayout.VERTICAL);
 
-            String state = entry.enabled ? "Enabled" : "Disabled";
+            String state = entry.enabled ? "Visible" : "Hidden";
             TextView name = text(entry.label + "  [" + state + "]", 15);
             name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             texts.addView(name);
