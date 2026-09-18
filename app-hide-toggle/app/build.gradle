@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 9
-        versionName '2.3.4-status-indicators'
+        versionCode 10
+        versionName '2.3.5-smooth-direct-toggle'
     }
 
     packaging {
