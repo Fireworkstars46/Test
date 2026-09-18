@@ -31,15 +31,26 @@ jobs:
         working-directory: app-hide-toggle
         run: gradle --no-daemon :app:assembleRelease
 
-      - name: Collect APK
+      - name: Collect APK and apksigner tool
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p app-hide-toggle-build
           cp app-hide-toggle/app/build/outputs/apk/release/app-release-unsigned.apk app-hide-toggle-build/AppHideToggle-unsigned.apk
 
+          mkdir -p apksigner-tool
+          APKSIGNER_JAR="$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)"
+          test -n "$APKSIGNER_JAR"
+          cp "$APKSIGNER_JAR" apksigner-tool/apksigner.jar
+
       - uses: actions/upload-artifact@v4
         with:
           name: AppHideToggle-Unsigned-Build
           path: app-hide-toggle-build/AppHideToggle-unsigned.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-ApkSigner-Tool
+          path: apksigner-tool/apksigner.jar
           if-no-files-found: error
