@@ -482,8 +482,8 @@ public class MainActivity extends Activity {
             for (String activityName : entry.launcherComponents) {
                 String component = entry.packageName + "/" + activityName;
                 String command = show
-                        ? "shell:pm enable --user 0 " + component
-                        : "shell:pm disable-user --user 0 " + component;
+                        ? "pm enable --user 0 " + component
+                        : "pm disable-user --user 0 " + component;
                 runPackageCommandWithRetry(manager, command);
             }
 
@@ -509,8 +509,8 @@ public class MainActivity extends Activity {
             if (manager == null) throw new IllegalStateException("Not connected");
 
             String command = enable
-                    ? "shell:pm enable --user 0 " + entry.packageName
-                    : "shell:pm disable-user --user 0 " + entry.packageName;
+                    ? "pm enable --user 0 " + entry.packageName
+                    : "pm disable-user --user 0 " + entry.packageName;
             runPackageCommandWithRetry(manager, command);
 
             runOnUiThread(() -> {
