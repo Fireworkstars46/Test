@@ -154,6 +154,8 @@ public class MainActivity extends Activity {
         appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(appsLabel);
 
+        root.addView(text("👁 = icon shown   👁̸ = icon hidden   ✓ = enabled   ✕ = disabled", 12));
+
         appCount = text("Scanning installed apps…", 13);
         root.addView(appCount);
 
@@ -690,11 +692,11 @@ public class MainActivity extends Activity {
             LinearLayout texts = new LinearLayout(MainActivity.this);
             texts.setOrientation(LinearLayout.VERTICAL);
 
-            String iconState = entry.launcherComponents.isEmpty()
-                    ? "No icon"
-                    : (entry.launcherShown ? "Shown" : "Hidden");
-            String appState = entry.enabled ? "Enabled" : "Disabled";
-            TextView name = text(entry.label + "  [Icon: " + iconState + " | App: " + appState + "]", 15);
+            String eyeIndicator = entry.launcherComponents.isEmpty()
+                    ? "—"
+                    : (entry.launcherShown ? "👁" : "👁̸");
+            String enabledIndicator = entry.enabled ? "✓" : "✕";
+            TextView name = text(eyeIndicator + "  " + enabledIndicator + "  " + entry.label, 15);
             name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             texts.addView(name);
 
