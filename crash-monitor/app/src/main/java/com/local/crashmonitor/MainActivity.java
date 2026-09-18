@@ -280,8 +280,13 @@ public class MainActivity extends Activity {
         pageScroll.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
         // Keep the scrollbar away from the curved/display edge so it stays visible
         // in full-screen and Samsung split-screen layouts.
-        pageScroll.setPadding(0, 0, dp(14), 0);
         pageScroll.setClipToPadding(true);
+        pageScroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
+            v.setPadding(dp(6), bars.top + dp(4), bars.right + dp(12), bars.bottom + dp(12));
+            return insets;
+        });
+        pageScroll.requestApplyInsets();
         pageScroll.addView(root, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
