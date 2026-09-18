@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
     private final ArrayList<AppEntry> installedApps = new ArrayList<>();
     private static final int REQUEST_SAVE_TEST_REPORT = 9047;
     private static final String PREF_LAUNCHER_CACHE = "launcher_component_cache_v1";
+    private static final String PREF_MANAGED_SYSTEM = "managed_system_packages_v1";
     private String latestTestReport = "";
 
     private TextView status;
@@ -864,6 +865,7 @@ public class MainActivity extends Activity {
 
             try {
                 Map<String, ArrayList<String>> launcherComponents = new HashMap<>();
+                Set<String> launcherUiPackages = new HashSet<>();
                 Intent launcherQuery = new Intent(Intent.ACTION_MAIN);
                 launcherQuery.addCategory(Intent.CATEGORY_LAUNCHER);
                 int launcherFlags = PackageManager.MATCH_DISABLED_COMPONENTS
@@ -894,6 +896,7 @@ public class MainActivity extends Activity {
                             String pkg = cn.getPackageName();
                             String cls = cn.getClassName();
                             if (pkg == null || cls == null) continue;
+                            launcherUiPackages.add(pkg);
                             ArrayList<String> list = launcherComponents
                                     .computeIfAbsent(pkg, k -> new ArrayList<>());
                             if (!list.contains(cls)) list.add(cls);
@@ -967,6 +970,7 @@ public class MainActivity extends Activity {
                     try {
                         Intent launchIntent = pm.getLaunchIntentForPackage(ai.packageName);
                         if (launchIntent != null && launchIntent.getComponent() != null) {
+                            launcherUiPackages.add(ai.packageName);
                             String activity = launchIntent.getComponent().getClassName();
                             if (activity != null && !components.contains(activity)) {
                                 components.add(activity);
@@ -998,16 +1002,21 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    // Keep the main list useful:
-                    // - normal/user-installed apps stay listed even if they do not
-                    //   expose a launcher icon, because the App toggle is still useful.
-                    // - system apps are shown only when they have a real/known launcher
-                    //   target, so settings-only features, overlays, navigation helpers,
-                    //   background services, etc. do not clutter the list.
+                    // Keep the main list user-facing:
+                    // - user-installed apps remain available even without a launcher icon,
+                    //   because their App toggle can still be useful.
+                    // - system packages must actually appear through LauncherApps or
+                    //   getLaunchIntentForPackage. ADB resolver-only activities are often
+                    //   Samsung diagnostics/settings helpers (for example ADControl/AD1)
+                    //   and should not appear as normal apps.
+                    // - once the user manually controls a system app, remember it so an
+                    //   intentionally hidden launcher app does not disappear after a scan.
                     boolean systemPackage =
                             (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
                             || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
-                    if (systemPackage && components.isEmpty()) {
+                    if (systemPackage
+                            && !launcherUiPackages.contains(ai.packageName)
+                            && !isManagedSystemPackage(ai.packageName)) {
                         continue;
                     }
 
@@ -1080,6 +1089,35 @@ public class MainActivity extends Activity {
             saveCachedLauncherComponents(pkg, list);
         }
         return result;
+    }
+
+    private void markManagedSystemPackage(String packageName) {
+        if (packageName == null || packageName.isEmpty()) return;
+        try {
+            ApplicationInfo ai = getPackageManager().getApplicationInfo(
+                    packageName, PackageManager.MATCH_DISABLED_COMPONENTS);
+            boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                    || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+            if (!system) return;
+
+            SharedPreferences prefs = getSharedPreferences(PREF_MANAGED_SYSTEM, MODE_PRIVATE);
+            Set<String> copy = new HashSet<>(prefs.getStringSet("packages", new HashSet<>()));
+            if (copy.add(packageName)) {
+                prefs.edit().putStringSet("packages", copy).apply();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean isManagedSystemPackage(String packageName) {
+        if (packageName == null || packageName.isEmpty()) return false;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREF_MANAGED_SYSTEM, MODE_PRIVATE);
+            Set<String> packages = prefs.getStringSet("packages", null);
+            return packages != null && packages.contains(packageName);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private ArrayList<String> loadCachedLauncherComponents(String packageName) {
@@ -1235,6 +1273,7 @@ public class MainActivity extends Activity {
         if (show == entry.launcherShown) return;
 
         saveCachedLauncherComponents(entry.packageName, entry.launcherComponents);
+        markManagedSystemPackage(entry.packageName);
         boolean previous = entry.launcherShown;
         entry.launcherShown = show;
         entry.busyVisibility = true;
@@ -1254,6 +1293,7 @@ public class MainActivity extends Activity {
         }
         if (enable == entry.enabled) return;
 
+        markManagedSystemPackage(entry.packageName);
         boolean previous = entry.enabled;
         entry.enabled = enable;
         entry.busyEnabled = true;
