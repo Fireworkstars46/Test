@@ -435,7 +435,6 @@ public class MainActivity extends Activity {
         boolean previous = entry.launcherShown;
         entry.launcherShown = show;
         entry.busyVisibility = true;
-        updateVisibleRow(entry);
         adbExecutor.submit(() -> executeVisibilityToggle(entry, show, previous));
     }
 
@@ -455,7 +454,6 @@ public class MainActivity extends Activity {
         boolean previous = entry.enabled;
         entry.enabled = enable;
         entry.busyEnabled = true;
-        updateVisibleRow(entry);
         adbExecutor.submit(() -> executeEnabledToggle(entry, enable, previous));
     }
 
@@ -639,6 +637,7 @@ public class MainActivity extends Activity {
                 if (!isEnabled()) return;
                 boolean next = !checked;
                 setState(next, true);
+                setEnabled(false);
                 if (listener != null) listener.onToggle(next);
             });
         }
