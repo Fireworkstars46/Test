@@ -6,7 +6,9 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
@@ -18,10 +20,10 @@ import android.view.WindowInsets;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -94,31 +96,39 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    private ImageButton indicatorButton() {
+        ImageButton b = new ImageButton(this);
+        b.setPadding(dp(7), dp(7), dp(7), dp(7));
+        b.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        b.setBackgroundResource(android.R.drawable.list_selector_background);
+        return b;
+    }
+
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(14), dp(16), dp(14));
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(16), dp(14), dp(16), dp(8));
 
         TextView title = text("App Hide Toggle", 26);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(title);
+        header.addView(title);
 
-        root.addView(text(
-                "Pair once with Android Wireless debugging. Tap an app below. The first button toggles its launcher icon between Shown and Hidden. The second button toggles the whole app between Enabled and Disabled.",
+        header.addView(text(
+                "Tap an app row to select it, or tap either status icon on the left to toggle it immediately. The eye controls the launcher icon; the check/X controls whether the whole app is enabled.",
                 14));
 
         status = text("Not connected", 15);
-        root.addView(status);
+        header.addView(status);
 
         Button openWireless = button("Open Developer options / Wireless debugging");
         openWireless.setOnClickListener(v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
-            } catch (Exception e) {
+            } catch (Exception ex) {
                 startActivity(new Intent(Settings.ACTION_SETTINGS));
             }
         });
-        root.addView(openWireless);
+        header.addView(openWireless);
 
         LinearLayout pairRow = new LinearLayout(this);
         pairRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -131,7 +141,7 @@ public class MainActivity extends Activity {
         codeInput.setHint("6-digit code");
         codeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         pairRow.addView(codeInput, new LinearLayout.LayoutParams(0, dp(58), 1));
-        root.addView(pairRow);
+        header.addView(pairRow);
 
         LinearLayout pairButtons = new LinearLayout(this);
         pairButtons.setOrientation(LinearLayout.HORIZONTAL);
@@ -139,7 +149,7 @@ public class MainActivity extends Activity {
         Button pair = button("Pair");
         pairButtons.addView(findPort, new LinearLayout.LayoutParams(0, dp(58), 1));
         pairButtons.addView(pair, new LinearLayout.LayoutParams(0, dp(58), 1));
-        root.addView(pairButtons);
+        header.addView(pairButtons);
         findPort.setOnClickListener(v -> findPairingPort());
         pair.setOnClickListener(v -> pair());
 
@@ -148,16 +158,18 @@ public class MainActivity extends Activity {
             setStatus("Connecting…");
             executor.submit(this::autoConnect);
         });
-        root.addView(connect);
+        header.addView(connect);
 
         TextView appsLabel = text("Installed apps", 17);
         appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(appsLabel);
+        header.addView(appsLabel);
 
-        root.addView(text("👁 = icon shown   👁̸ = icon hidden   ✓ = enabled   ✕ = disabled", 12));
+        header.addView(text(
+                "Eye = shown/hidden launcher icon   •   ✓ = enabled   •   ✕ = disabled\nTap the eye or ✓/✕ itself to toggle that setting.",
+                12));
 
         appCount = text("Scanning installed apps…", 13);
-        root.addView(appCount);
+        header.addView(appCount);
 
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -169,26 +181,65 @@ public class MainActivity extends Activity {
 
         Button rescan = button("Rescan");
         searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
-        root.addView(searchRow);
+        header.addView(searchRow);
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.VERTICAL);
+        footer.setPadding(dp(16), dp(10), dp(16), dp(18));
+
+        selectedApp = text("No app selected", 14);
+        selectedApp.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        selectedApp.setTextIsSelectable(true);
+        footer.addView(selectedApp);
+
+        footer.addView(text(
+                "Warning: hiding or disabling Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide or disable itself.",
+                13));
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        visibilityToggleButton = button("Hide / Show");
+        enabledToggleButton = button("Disable / Enable");
+        actionRow.addView(visibilityToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
+        actionRow.addView(enabledToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
+        footer.addView(actionRow);
+
+        visibilityToggleButton.setEnabled(false);
+        enabledToggleButton.setEnabled(false);
+        visibilityToggleButton.setOnClickListener(v -> toggleSelectedVisibility());
+        enabledToggleButton.setOnClickListener(v -> toggleSelectedEnabled());
+
+        TextView resultLabel = text("Result", 16);
+        resultLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        footer.addView(resultLabel);
+
+        result = text("", 13);
+        result.setTypeface(Typeface.MONOSPACE);
+        result.setTextIsSelectable(true);
+        result.setMinHeight(dp(90));
+        footer.addView(result);
 
         appList = new ListView(this);
-        appList.setNestedScrollingEnabled(true);
         appList.setVerticalScrollBarEnabled(true);
         appList.setScrollbarFadingEnabled(false);
-        appList.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        appList.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
         appList.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
+        appList.setSmoothScrollbarEnabled(true);
+        appList.setFastScrollEnabled(true);
+        appList.setClipToPadding(true);
+        appList.addHeaderView(header, null, false);
+        appList.addFooterView(footer, null, false);
+
         appAdapter = new AppAdapter();
         appList.setAdapter(appAdapter);
 
-        int windowHeight = getWindowManager().getCurrentWindowMetrics().getBounds().height();
-        int listHeight = Math.max(dp(220), Math.min(dp(520), (int) (windowHeight * 0.55f)));
-        root.addView(appList, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, listHeight));
-
         appList.setOnItemClickListener((parent, view, position, id) -> {
-            AppEntry entry = appAdapter.getItem(position);
+            Object item = parent.getItemAtPosition(position);
+            if (!(item instanceof AppEntry)) return;
+            AppEntry entry = (AppEntry) item;
             selectedPackage = entry.packageName;
             updateSelectedAppText();
+            appAdapter.notifyDataSetChanged();
         });
 
         searchInput.addTextChangedListener(new TextWatcher() {
@@ -202,55 +253,14 @@ public class MainActivity extends Activity {
 
         rescan.setOnClickListener(v -> loadInstalledApps());
 
-        selectedApp = text("No app selected", 14);
-        selectedApp.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        selectedApp.setTextIsSelectable(true);
-        root.addView(selectedApp);
-
-        root.addView(text(
-                "Warning: hiding or disabling Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide or disable itself.",
-                13));
-
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        visibilityToggleButton = button("Hide / Show");
-        enabledToggleButton = button("Disable / Enable");
-        actionRow.addView(visibilityToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
-        actionRow.addView(enabledToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
-        root.addView(actionRow);
-
-        visibilityToggleButton.setEnabled(false);
-        enabledToggleButton.setEnabled(false);
-        visibilityToggleButton.setOnClickListener(v -> toggleSelectedVisibility());
-        enabledToggleButton.setOnClickListener(v -> toggleSelectedEnabled());
-
-        TextView resultLabel = text("Result", 16);
-        resultLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(resultLabel);
-
-        result = text("", 13);
-        result.setTypeface(Typeface.MONOSPACE);
-        result.setTextIsSelectable(true);
-        result.setMinHeight(dp(90));
-        root.addView(result);
-
-        pageScroll = new ScrollView(this);
-        pageScroll.setFillViewport(true);
-        pageScroll.setVerticalScrollBarEnabled(true);
-        pageScroll.setScrollbarFadingEnabled(false);
-        pageScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        pageScroll.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
-        pageScroll.setClipToPadding(true);
-        pageScroll.setOnApplyWindowInsetsListener((v, insets) -> {
+        appList.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
             v.setPadding(dp(6), bars.top + dp(4), bars.right + dp(12), bars.bottom + dp(12));
             return insets;
         });
-        pageScroll.addView(root, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT));
-        setContentView(pageScroll);
-        pageScroll.requestApplyInsets();
+
+        setContentView(appList);
+        appList.requestApplyInsets();
     }
 
     private void loadInstalledApps() {
@@ -322,7 +332,14 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    found.add(new AppEntry(label, ai.packageName, enabled, launcherShown, components));
+                    Drawable appIcon;
+                    try {
+                        appIcon = pm.getApplicationIcon(ai);
+                    } catch (Throwable ignored) {
+                        appIcon = null;
+                    }
+
+                    found.add(new AppEntry(label, ai.packageName, enabled, launcherShown, components, appIcon));
                 }
 
                 found.sort(Comparator
@@ -623,14 +640,33 @@ public class MainActivity extends Activity {
         final boolean enabled;
         final boolean launcherShown;
         final ArrayList<String> launcherComponents;
+        final Drawable icon;
 
         AppEntry(String label, String packageName, boolean enabled,
-                 boolean launcherShown, ArrayList<String> launcherComponents) {
+                 boolean launcherShown, ArrayList<String> launcherComponents, Drawable icon) {
             this.label = label;
             this.packageName = packageName;
             this.enabled = enabled;
             this.launcherShown = launcherShown;
             this.launcherComponents = new ArrayList<>(launcherComponents);
+            this.icon = icon;
+        }
+    }
+
+    private static class RowHolder {
+        final ImageButton visibility;
+        final ImageButton enabled;
+        final ImageView appIcon;
+        final TextView name;
+        final TextView pkg;
+
+        RowHolder(ImageButton visibility, ImageButton enabled, ImageView appIcon,
+                  TextView name, TextView pkg) {
+            this.visibility = visibility;
+            this.enabled = enabled;
+            this.appIcon = appIcon;
+            this.name = name;
+            this.pkg = pkg;
         }
     }
 
@@ -671,43 +707,92 @@ public class MainActivity extends Activity {
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             AppEntry entry = getItem(position);
+            RowHolder holder;
 
-            LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(8), dp(8), dp(8));
-            row.setMinimumHeight(dp(62));
+            if (convertView == null) {
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(6), dp(6), dp(8), dp(6));
+                row.setMinimumHeight(dp(62));
+                row.setBackgroundResource(android.R.drawable.list_selector_background);
 
-            ImageView icon = new ImageView(MainActivity.this);
-            try {
-                icon.setImageDrawable(getPackageManager().getApplicationIcon(entry.packageName));
-            } catch (Throwable ignored) {
-                icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                ImageButton eye = indicatorButton();
+                row.addView(eye, new LinearLayout.LayoutParams(dp(42), dp(42)));
+
+                ImageButton enabled = indicatorButton();
+                LinearLayout.LayoutParams enabledParams = new LinearLayout.LayoutParams(dp(42), dp(42));
+                enabledParams.setMargins(dp(2), 0, dp(7), 0);
+                row.addView(enabled, enabledParams);
+
+                ImageView appIcon = new ImageView(MainActivity.this);
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(42), dp(42));
+                iconParams.setMargins(0, 0, dp(10), 0);
+                row.addView(appIcon, iconParams);
+
+                LinearLayout texts = new LinearLayout(MainActivity.this);
+                texts.setOrientation(LinearLayout.VERTICAL);
+
+                TextView name = text("", 15);
+                name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                texts.addView(name);
+
+                TextView pkg = text("", 12);
+                pkg.setTextIsSelectable(false);
+                texts.addView(pkg);
+
+                row.addView(texts, new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+                holder = new RowHolder(eye, enabled, appIcon, name, pkg);
+                row.setTag(holder);
+                convertView = row;
+            } else {
+                holder = (RowHolder) convertView.getTag();
             }
 
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(46), dp(46));
-            iconParams.setMargins(0, 0, dp(10), 0);
-            row.addView(icon, iconParams);
+            holder.name.setText(entry.label);
+            holder.pkg.setText(entry.packageName);
+            holder.appIcon.setImageDrawable(entry.icon != null
+                    ? entry.icon
+                    : getDrawable(android.R.drawable.sym_def_app_icon));
 
-            LinearLayout texts = new LinearLayout(MainActivity.this);
-            texts.setOrientation(LinearLayout.VERTICAL);
+            int tint = holder.name.getCurrentTextColor();
+            holder.visibility.setImageTintList(ColorStateList.valueOf(tint));
+            holder.enabled.setImageTintList(ColorStateList.valueOf(tint));
 
-            String eyeIndicator = entry.launcherComponents.isEmpty()
-                    ? "—"
-                    : (entry.launcherShown ? "👁" : "👁̸");
-            String enabledIndicator = entry.enabled ? "✓" : "✕";
-            TextView name = text(eyeIndicator + "  " + enabledIndicator + "  " + entry.label, 15);
-            name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-            texts.addView(name);
+            boolean hasLauncher = !entry.launcherComponents.isEmpty();
+            holder.visibility.setImageResource(entry.launcherShown
+                    ? R.drawable.ic_visibility
+                    : R.drawable.ic_visibility_off);
+            holder.visibility.setEnabled(hasLauncher);
+            holder.visibility.setAlpha(hasLauncher ? 1f : 0.28f);
+            holder.visibility.setContentDescription(entry.launcherShown
+                    ? "Hide " + entry.label + " launcher icon"
+                    : "Show " + entry.label + " launcher icon");
+            holder.visibility.setOnClickListener(v -> {
+                if (!hasLauncher) return;
+                selectedPackage = entry.packageName;
+                updateSelectedAppText();
+                toggleSelectedVisibility();
+            });
 
-            TextView pkg = text(entry.packageName, 12);
-            pkg.setTextIsSelectable(false);
-            texts.addView(pkg);
+            holder.enabled.setImageResource(entry.enabled
+                    ? R.drawable.ic_check
+                    : R.drawable.ic_close);
+            holder.enabled.setEnabled(true);
+            holder.enabled.setAlpha(1f);
+            holder.enabled.setContentDescription(entry.enabled
+                    ? "Disable " + entry.label
+                    : "Enable " + entry.label);
+            holder.enabled.setOnClickListener(v -> {
+                selectedPackage = entry.packageName;
+                updateSelectedAppText();
+                toggleSelectedEnabled();
+            });
 
-            row.addView(texts, new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-            return row;
+            convertView.setActivated(entry.packageName.equals(selectedPackage));
+            return convertView;
         }
     }
 }
