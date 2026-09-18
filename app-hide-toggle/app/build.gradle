@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 18
-        versionName '2.4.3-fixed-smooth-switches'
+        versionCode 19
+        versionName '2.4.4-toggle-command-fix'
     }
 
     packaging {
