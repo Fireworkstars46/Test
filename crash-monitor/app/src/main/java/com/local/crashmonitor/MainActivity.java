@@ -46,8 +46,8 @@ public class MainActivity extends Activity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 46;
     private static final int PREVIEW_IMPORTANT_BYTES = 80_000;
     private static final int PREVIEW_RAW_BYTES = 180_000;
-    private static final int PREVIEW_IMPORTANT_LINES = 200;
-    private static final int PREVIEW_RAW_LINES = 900;
+    private static final int PREVIEW_IMPORTANT_LINES = 100;
+    private static final int PREVIEW_RAW_LINES = 300;
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -278,8 +278,10 @@ public class MainActivity extends Activity {
         pageScroll.setScrollbarFadingEnabled(false);
         pageScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
         pageScroll.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
-        pageScroll.setPadding(0, 0, dp(6), 0);
-        pageScroll.setClipToPadding(false);
+        // Keep the scrollbar away from the curved/display edge so it stays visible
+        // in full-screen and Samsung split-screen layouts.
+        pageScroll.setPadding(0, 0, dp(14), 0);
+        pageScroll.setClipToPadding(true);
         pageScroll.addView(root, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
@@ -397,12 +399,18 @@ public class MainActivity extends Activity {
         // the raw preview so the same event is not shown twice on screen.
         Set<String> importantLines = new HashSet<>();
         for (String line : important.split("\n")) {
-            if (!line.trim().isEmpty()) importantLines.add(line);
+            String normalized = stripCategoryPrefix(line);
+            if (!normalized.trim().isEmpty()) importantLines.add(normalized);
         }
 
         StringBuilder filteredRaw = new StringBuilder();
+        Set<String> seenRaw = new HashSet<>();
         for (String line : raw.split("\n")) {
-            if (!importantLines.contains(line)) filteredRaw.append(line).append('\n');
+            if (line.trim().isEmpty()) continue;
+            if (importantLines.contains(line)) continue;
+            // Do not show the same exact raw line twice in the on-screen preview.
+            if (!seenRaw.add(line)) continue;
+            filteredRaw.append(line).append('\n');
         }
 
         StringBuilder out = new StringBuilder();
@@ -413,6 +421,15 @@ public class MainActivity extends Activity {
         out.append(filteredRaw.length() == 0 ? "(no additional raw log data yet)\n" : filteredRaw);
         out.append("\n[Screen preview is capped for smooth scrolling. Save full TXT keeps the complete log.]\n");
         return out.toString();
+    }
+
+    private String stripCategoryPrefix(String line) {
+        if (line == null) return "";
+        if (line.matches("^\\[[A-Z]+\\]\\s+.*")) {
+            int end = line.indexOf("] ");
+            if (end >= 0 && end + 2 < line.length()) return line.substring(end + 2);
+        }
+        return line;
     }
 
     private String keepLastLines(String text, int maxLines) {
