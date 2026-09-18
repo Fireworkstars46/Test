@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
@@ -18,6 +20,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Process;
 import android.net.Uri;
 import android.provider.Settings;
 import android.text.Editable;
@@ -635,9 +638,32 @@ public class MainActivity extends Activity {
                 for (ResolveInfo ri : launchers) {
                     if (ri.activityInfo == null || ri.activityInfo.packageName == null
                             || ri.activityInfo.name == null) continue;
-                    launcherComponents
-                            .computeIfAbsent(ri.activityInfo.packageName, k -> new ArrayList<>())
-                            .add(ri.activityInfo.name);
+                    ArrayList<String> list = launcherComponents
+                            .computeIfAbsent(ri.activityInfo.packageName, k -> new ArrayList<>());
+                    if (!list.contains(ri.activityInfo.name)) list.add(ri.activityInfo.name);
+                }
+
+                // LauncherApps is the same class of launcher-facing API used by home
+                // screens. Merge its visible launcher activities too, because Samsung
+                // can return a slightly different set from PackageManager.queryIntentActivities.
+                try {
+                    LauncherApps launcherApps =
+                            (LauncherApps) getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                    if (launcherApps != null) {
+                        List<LauncherActivityInfo> launcherInfos =
+                                launcherApps.getActivityList(null, Process.myUserHandle());
+                        for (LauncherActivityInfo info : launcherInfos) {
+                            if (info == null || info.getComponentName() == null) continue;
+                            ComponentName cn = info.getComponentName();
+                            String pkg = cn.getPackageName();
+                            String cls = cn.getClassName();
+                            if (pkg == null || cls == null) continue;
+                            ArrayList<String> list = launcherComponents
+                                    .computeIfAbsent(pkg, k -> new ArrayList<>());
+                            if (!list.contains(cls)) list.add(cls);
+                        }
+                    }
+                } catch (Throwable ignored) {
                 }
 
                 int adbLauncherTargets = 0;
@@ -787,12 +813,11 @@ public class MainActivity extends Activity {
         AdbConnectionManager manager = requireConnection();
         if (manager == null) throw new IllegalStateException("Wireless ADB not connected");
 
-        // MATCH_DISABLED_COMPONENTS (0x200) + MATCH_DISABLED_UNTIL_USED_COMPONENTS
-        // (0x8000) + MATCH_ALL (0x20000). This lets the shell resolver return
-        // launcher activities that the normal app-side resolver can omit.
+        // Ask Android's shell PackageManager for the launcher-facing resolver list.
+        // Do not pass --query-flags here: query-activities does not support that
+        // option on this Samsung build and it makes the deep scan fail.
         String command =
                 "cmd package query-activities --brief --components --user 0 "
-                + "--query-flags 0x28200 "
                 + "-a android.intent.action.MAIN "
                 + "-c android.intent.category.LAUNCHER";
         String output = runAdbCommandWithMarker(manager, command, 4000);
@@ -1067,32 +1092,131 @@ public class MainActivity extends Activity {
                                      ComponentName component,
                                      boolean show) throws Exception {
         String flat = component.getPackageName() + "/" + component.getClassName();
-        String command = show
-                ? "pm enable --user 0 " + flat
-                : "pm disable --user 0 " + flat;
+        Throwable last = null;
 
-        AdbStream stream = null;
-        try {
-            stream = manager.openStream("shell:" + command);
-            // PackageManager applies these component changes within a few tens of
-            // milliseconds on this Samsung device. Do not wait for stdout/EOF:
-            // libadb can keep that stream open even after Android applied the state.
-            try { Thread.sleep(140); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        for (int attempt = 0; attempt < 2; attempt++) {
+            AdbStream stream = null;
+            try {
+                String command = show
+                        ? "pm enable --user 0 " + flat
+                        : "pm disable --user 0 " + flat;
+                stream = manager.openStream("shell:" + command);
+                try { Thread.sleep(140); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } catch (Throwable e) {
+                last = e;
+            } finally {
+                if (stream != null) {
+                    try { stream.close(); } catch (Throwable ignored) { }
+                }
             }
-        } catch (Throwable first) {
-            // One reconnect + one retry only if the command could not even be sent.
-            try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
-            stream = null;
-            stream = manager.openStream("shell:" + command);
-            try { Thread.sleep(140); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+
+            try {
+                Boolean disabled = queryComponentDisabledViaAdb(manager, component);
+                if (disabled != null && (show ? !disabled : disabled)) {
+                    return;
+                }
+            } catch (Throwable e) {
+                last = e;
             }
-        } finally {
-            if (stream != null) {
-                try { stream.close(); } catch (Throwable ignored) { }
+
+            // Samsung has accepted the per-user component state on some apps even
+            // when the regular disable command reported oddly. Use it only as a
+            // second hide attempt, then verify through dumpsys instead of trusting stdout.
+            if (!show) {
+                AdbStream fallback = null;
+                try {
+                    fallback = manager.openStream(
+                            "shell:pm disable-user --user 0 " + flat);
+                    try { Thread.sleep(140); } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                } catch (Throwable e) {
+                    last = e;
+                } finally {
+                    if (fallback != null) {
+                        try { fallback.close(); } catch (Throwable ignored) { }
+                    }
+                }
+
+                try {
+                    Boolean disabled = queryComponentDisabledViaAdb(manager, component);
+                    if (Boolean.TRUE.equals(disabled)) return;
+                } catch (Throwable e) {
+                    last = e;
+                }
+            }
+
+            if (attempt == 0) {
+                try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
             }
         }
+
+        if (last instanceof Exception) throw (Exception) last;
+        throw new IllegalStateException(
+                show ? "Android did not re-enable the launcher icon."
+                     : "Android did not hide the launcher icon.");
+    }
+
+    private Boolean queryComponentDisabledViaAdb(AdbConnectionManager manager,
+                                                 ComponentName component)
+            throws Exception {
+        String output = runAdbCommandWithMarker(
+                manager, "dumpsys package " + component.getPackageName(), 4000);
+        if (output == null || output.trim().isEmpty()) return null;
+
+        String target = normalizeComponentClass(
+                component.getPackageName(), component.getClassName());
+
+        boolean inUser0 = false;
+        boolean inDisabled = false;
+        boolean sawDisabledSection = false;
+
+        for (String raw : output.split("\\r?\\n")) {
+            String line = raw == null ? "" : raw.trim();
+            if (line.startsWith("User 0:")) {
+                inUser0 = true;
+                inDisabled = false;
+                continue;
+            }
+            if (inUser0 && line.startsWith("User ") && !line.startsWith("User 0:")) {
+                break;
+            }
+            if (!inUser0) continue;
+
+            if ("disabledComponents:".equals(line)) {
+                inDisabled = true;
+                sawDisabledSection = true;
+                continue;
+            }
+
+            if (inDisabled) {
+                if (line.endsWith(":")
+                        || line.startsWith("enabledComponents")
+                        || line.startsWith("grantedPermissions")
+                        || line.startsWith("runtime permissions")) {
+                    inDisabled = false;
+                    continue;
+                }
+                if (line.isEmpty()) continue;
+
+                String normalized = normalizeComponentClass(
+                        component.getPackageName(), line);
+                if (target.equals(normalized)) return true;
+            }
+        }
+
+        return sawDisabledSection ? Boolean.FALSE : null;
+    }
+
+    private String normalizeComponentClass(String pkg, String value) {
+        if (value == null) return "";
+        String s = value.trim();
+        int slash = s.indexOf('/');
+        if (slash >= 0 && slash < s.length() - 1) s = s.substring(slash + 1);
+        if (s.startsWith(".")) s = pkg + s;
+        return s;
     }
 
     private void applyPackageState(AdbConnectionManager manager,
