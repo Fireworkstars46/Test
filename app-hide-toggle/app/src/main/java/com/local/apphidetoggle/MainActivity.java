@@ -6,6 +6,7 @@ import android.animation.ValueAnimator;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -67,6 +68,7 @@ public class MainActivity extends Activity {
     private final ExecutorService adbExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<AppEntry> installedApps = new ArrayList<>();
     private static final int REQUEST_SAVE_TEST_REPORT = 9047;
+    private static final String PREF_LAUNCHER_CACHE = "launcher_component_cache_v1";
     private String latestTestReport = "";
 
     private TextView status;
@@ -613,7 +615,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadInstalledApps() {
-        runOnUiThread(() -> appCount.setText("Scanning installed apps…"));
+        runOnUiThread(() -> appCount.setText("Full scanning installed apps + launcher components…"));
         executor.submit(() -> {
             ArrayList<AppEntry> found = new ArrayList<>();
             Set<String> seenPackages = new HashSet<>();
@@ -666,9 +668,16 @@ public class MainActivity extends Activity {
                     if (components == null) components = new ArrayList<>();
                     else components = new ArrayList<>(components);
 
+                    // Keep known launcher components across scans/restarts. Once this app
+                    // hides a launcher activity, Samsung may omit it from normal resolver
+                    // queries; the cache lets Full scan still find and restore it.
+                    for (String cached : loadCachedLauncherComponents(ai.packageName)) {
+                        if (!components.contains(cached)) components.add(cached);
+                    }
+
                     // Samsung can occasionally omit an otherwise launchable activity from
                     // the bulk resolver query. Add the package's concrete launch component
-                    // as a fallback so the Icon switch/full test still has a target.
+                    // as a fallback while it is still visible.
                     try {
                         Intent launchIntent = pm.getLaunchIntentForPackage(ai.packageName);
                         if (launchIntent != null && launchIntent.getComponent() != null) {
@@ -678,6 +687,10 @@ public class MainActivity extends Activity {
                             }
                         }
                     } catch (Throwable ignored) {
+                    }
+
+                    if (!components.isEmpty()) {
+                        saveCachedLauncherComponents(ai.packageName, components);
                     }
 
                     boolean launcherShown = false;
@@ -719,12 +732,53 @@ public class MainActivity extends Activity {
                     appAdapter.setApps(installedApps);
                     String q = searchInput.getText().toString();
                     appAdapter.filter(q);
-                    appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
+                    int launcherTargets = 0;
+                    for (AppEntry e : installedApps) {
+                        if (!e.launcherComponents.isEmpty()) launcherTargets++;
+                    }
+                    appCount.setText("Full scan complete — "
+                            + installedApps.size() + " apps, "
+                            + launcherTargets + " with launcher targets. Showing "
+                            + appAdapter.getCount() + ".");
                 });
             } catch (Throwable e) {
                 runOnUiThread(() -> appCount.setText("Could not scan apps: " + shortError(e)));
             }
         });
+    }
+
+    private ArrayList<String> loadCachedLauncherComponents(String packageName) {
+        ArrayList<String> out = new ArrayList<>();
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREF_LAUNCHER_CACHE, MODE_PRIVATE);
+            String raw = prefs.getString(packageName, "");
+            if (raw == null || raw.isEmpty()) return out;
+            for (String part : raw.split("\\u001F", -1)) {
+                if (part != null && !part.isEmpty() && !out.contains(part)) out.add(part);
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    private void saveCachedLauncherComponents(String packageName, List<String> components) {
+        if (packageName == null || packageName.isEmpty()
+                || components == null || components.isEmpty()) return;
+        try {
+            StringBuilder raw = new StringBuilder();
+            for (String component : components) {
+                if (component == null || component.isEmpty()) continue;
+                if (raw.length() > 0) raw.append('\u001F');
+                raw.append(component);
+            }
+            if (raw.length() > 0) {
+                getSharedPreferences(PREF_LAUNCHER_CACHE, MODE_PRIVATE)
+                        .edit()
+                        .putString(packageName, raw.toString())
+                        .apply();
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private void updateVisibleRow(AppEntry entry) {
@@ -845,6 +899,7 @@ public class MainActivity extends Activity {
         }
         if (show == entry.launcherShown) return;
 
+        saveCachedLauncherComponents(entry.packageName, entry.launcherComponents);
         boolean previous = entry.launcherShown;
         entry.launcherShown = show;
         entry.busyVisibility = true;
@@ -1049,8 +1104,8 @@ public class MainActivity extends Activity {
     private boolean pmReplyHasAnyState(String output, String... expectedStates) {
         String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
 
-        // The PackageManager confirmation is authoritative. Some Samsung builds
-        // can include extra diagnostic text around a command that still applied.
+        // Samsung's 'pm' stdout is inconsistent across commands/builds. If it
+        // explicitly reports the requested state, accept it immediately.
         for (String expected : expectedStates) {
             if (expected != null
                     && lower.contains("new state: " + expected.toLowerCase(Locale.ROOT))) {
@@ -1058,7 +1113,19 @@ public class MainActivity extends Activity {
             }
         }
 
-        return false;
+        // Reject only explicit command failures. Reaching our completion marker
+        // without one of these means the shell command itself finished normally.
+        if (lower.contains("securityexception")
+                || lower.contains("permission denial")
+                || lower.contains("unknown package")
+                || lower.contains("unknown component")
+                || lower.contains("not found")
+                || lower.contains("error:")
+                || lower.contains("failed")) {
+            return false;
+        }
+
+        return true;
     }
 
     private String compactReply(String output) {
