@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 25
-        versionName '2.5-pm-reply-verification'
+        versionCode 26
+        versionName '2.5.1-safe-test-mode'
     }
 
     packaging {
