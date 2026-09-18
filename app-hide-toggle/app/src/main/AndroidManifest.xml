@@ -21,5 +21,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity-alias
+            android:name=".TestToggleTarget"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 </manifest>
