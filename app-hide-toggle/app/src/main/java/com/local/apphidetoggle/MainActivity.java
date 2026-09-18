@@ -392,14 +392,13 @@ public class MainActivity extends Activity {
 
         // Automatically choose a safe normal user app, preferring one that is
         // not currently running, so the real App OFF test is minimally disruptive.
-        AppEntry target = null;
+        AppEntry tmpTarget = null;
         try {
-            target = selectAutomaticTestApp(manager);
-            final AppEntry selectedTarget = target;
-        if (selectedTarget != null) {
+            tmpTarget = selectAutomaticTestApp(manager);
+            if (tmpTarget != null) {
                 lines.add("✅ Automatic test-app selection: PASS");
-                lines.add("Test app: " + selectedTarget.label);
-                lines.add("Package: " + selectedTarget.packageName);
+                lines.add("Test app: " + tmpTarget.label);
+                lines.add("Package: " + tmpTarget.packageName);
                 passed++;
             } else {
                 lines.add("❌ Automatic test-app selection: FAIL — no eligible user app found");
@@ -409,9 +408,10 @@ public class MainActivity extends Activity {
             lines.add("❌ Automatic test-app selection: FAIL — " + shortError(e));
             failed++;
         }
+        final AppEntry selectedTarget = tmpTarget;
         publishTestResult(testResult, lines, passed, failed, true);
 
-        if (target != null) {
+        if (selectedTarget != null) {
             final boolean originalEnabled = selectedTarget.enabled;
             final boolean originalLauncherShown = selectedTarget.launcherShown;
 
@@ -544,7 +544,7 @@ public class MainActivity extends Activity {
                 selectedTarget.launcherShown = originalLauncherShown;
                 selectedTarget.busyEnabled = false;
                 selectedTarget.busyVisibility = false;
-                updateVisibleRow(target);
+                updateVisibleRow(selectedTarget);
             });
         }
 
