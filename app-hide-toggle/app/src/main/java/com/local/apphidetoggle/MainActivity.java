@@ -189,6 +189,8 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setScrollbarFadingEnabled(false);
         scroll.addView(root);
         setContentView(scroll);
     }
@@ -261,8 +263,10 @@ public class MainActivity extends Activity {
         ListView list = new ListView(this);
         AppAdapter adapter = new AppAdapter(installedApps);
         list.setAdapter(adapter);
+        int windowHeight = getWindowManager().getCurrentWindowMetrics().getBounds().height();
+        int listHeight = Math.max(dp(110), windowHeight - dp(180));
         box.addView(list, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(520)));
+                LinearLayout.LayoutParams.MATCH_PARENT, listHeight));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Choose installed app")
@@ -286,6 +290,11 @@ public class MainActivity extends Activity {
         });
 
         dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
     }
 
     private void updateSelectedAppText() {
