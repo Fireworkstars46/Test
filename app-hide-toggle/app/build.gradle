@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 22
-        versionName '2.4.7-test-mode'
+        versionCode 23
+        versionName '2.4.8-test-report-export'
     }
 
     packaging {
