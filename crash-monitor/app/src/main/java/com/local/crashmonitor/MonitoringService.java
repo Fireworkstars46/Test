@@ -17,8 +17,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -59,6 +62,9 @@ public class MonitoringService extends Service {
     private volatile boolean workerRunning;
     private volatile boolean clearOnNextConnect;
     private volatile AdbStream monitorStream;
+    private static final int RECENT_DEDUPE_LIMIT = 256;
+    private final ArrayDeque<String> recentLineQueue = new ArrayDeque<>();
+    private final Set<String> recentLineSet = new HashSet<>();
 
     @Override
     public void onCreate() {
@@ -206,6 +212,7 @@ public class MonitoringService extends Service {
             String line;
             while (!stopRequested && isMasterEnabled() && isMonitoringEnabled()
                     && (line = reader.readLine()) != null) {
+                if (isRecentExactDuplicate(line)) continue;
                 String rawLine = line + "\n";
                 byte[] rawBytes = rawLine.getBytes(StandardCharsets.UTF_8);
                 rawOut.write(rawBytes);
@@ -250,6 +257,26 @@ public class MonitoringService extends Service {
                 try { importantOut.flush(); } catch (Throwable ignored) { }
                 try { importantOut.close(); } catch (Throwable ignored) { }
             }
+        }
+    }
+
+    private boolean isRecentExactDuplicate(String line) {
+        synchronized (recentLineQueue) {
+            if (recentLineSet.contains(line)) return true;
+            recentLineQueue.addLast(line);
+            recentLineSet.add(line);
+            while (recentLineQueue.size() > RECENT_DEDUPE_LIMIT) {
+                String oldest = recentLineQueue.removeFirst();
+                recentLineSet.remove(oldest);
+            }
+            return false;
+        }
+    }
+
+    private void clearRecentDedupe() {
+        synchronized (recentLineQueue) {
+            recentLineQueue.clear();
+            recentLineSet.clear();
         }
     }
 
@@ -338,6 +365,7 @@ public class MonitoringService extends Service {
     }
 
     private void clearLocalLogs() {
+        clearRecentDedupe();
         clearFile(new File(getFilesDir(), LOG_FILE));
         clearFile(new File(getFilesDir(), IMPORTANT_FILE));
         if (isMonitoringEnabled()) setState("Logging ALL ADB-visible Android log buffers");
