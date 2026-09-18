@@ -10,15 +10,12 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 3
-        versionName '2.1-installfix'
+        versionCode 4
+        versionName '2.2-app-list'
     }
 
     packaging {
         jniLibs {
-            // Keep native libraries compressed/extracted at install time. This avoids
-            // INSTALL_FAILED_INVALID_APK on devices that reject unaligned .so files
-            // from transitive ADB/Conscrypt dependencies.
             useLegacyPackaging = true
         }
     }
