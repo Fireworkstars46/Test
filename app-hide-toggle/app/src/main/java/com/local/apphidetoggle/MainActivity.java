@@ -17,6 +17,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.net.Uri;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
@@ -36,14 +37,17 @@ import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.text.SimpleDateFormat;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -60,6 +64,8 @@ public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ExecutorService adbExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<AppEntry> installedApps = new ArrayList<>();
+    private static final int REQUEST_SAVE_TEST_REPORT = 9047;
+    private String latestTestReport = "";
 
     private TextView status;
     private TextView result;
@@ -240,6 +246,11 @@ public class MainActivity extends Activity {
         Button run = button("Run safe self-test");
         box.addView(run);
 
+        Button saveReport = button("Save Test Report");
+        saveReport.setEnabled(false);
+        saveReport.setOnClickListener(v -> saveLatestTestReport());
+        box.addView(saveReport);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Test mode")
                 .setView(box)
@@ -248,14 +259,16 @@ public class MainActivity extends Activity {
 
         run.setOnClickListener(v -> {
             run.setEnabled(false);
+            saveReport.setEnabled(false);
+            latestTestReport = "";
             testResult.setText("⏳ Starting safe self-test…");
-            adbExecutor.submit(() -> runSafeSelfTest(testResult, run));
+            adbExecutor.submit(() -> runSafeSelfTest(testResult, run, saveReport));
         });
 
         dialog.show();
     }
 
-    private void runSafeSelfTest(TextView testResult, Button runButton) {
+    private void runSafeSelfTest(TextView testResult, Button runButton, Button saveButton) {
         ArrayList<String> lines = new ArrayList<>();
         int passed = 0;
         int failed = 0;
@@ -391,7 +404,10 @@ public class MainActivity extends Activity {
                 : "❌ RESULT: One or more checks failed.");
 
         publishTestResult(testResult, lines, passed, failed, false);
-        runOnUiThread(() -> runButton.setEnabled(true));
+        runOnUiThread(() -> {
+            runButton.setEnabled(true);
+            saveButton.setEnabled(!latestTestReport.isEmpty());
+        });
     }
 
     private void publishTestResult(TextView target,
@@ -410,7 +426,67 @@ public class MainActivity extends Activity {
         if (running) text.append("\nTesting…");
 
         String finalText = text.toString();
+        if (!running) {
+            String version = "unknown";
+            try {
+                version = getPackageManager()
+                        .getPackageInfo(getPackageName(), 0)
+                        .versionName;
+            } catch (Throwable ignored) {
+            }
+            String when = new SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+            latestTestReport =
+                    "App Hide Toggle Test Report\n"
+                    + "Version: " + version + "\n"
+                    + "Generated: " + when + "\n\n"
+                    + finalText + "\n";
+        }
         runOnUiThread(() -> target.setText(finalText));
+    }
+
+    private void saveLatestTestReport() {
+        if (latestTestReport == null || latestTestReport.trim().isEmpty()) {
+            toast("Run the self-test first.");
+            return;
+        }
+
+        String stamp = new SimpleDateFormat(
+                "yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE,
+                "AppHideToggle-Test-Report-" + stamp + ".txt");
+        try {
+            startActivityForResult(intent, REQUEST_SAVE_TEST_REPORT);
+        } catch (Throwable e) {
+            toast("Could not open file picker: " + shortError(e));
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_SAVE_TEST_REPORT || resultCode != RESULT_OK
+                || data == null) {
+            return;
+        }
+
+        Uri uri = data.getData();
+        if (uri == null) {
+            toast("No save location selected.");
+            return;
+        }
+
+        try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+            if (out == null) throw new IllegalStateException("Could not open output file");
+            out.write(latestTestReport.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            toast("Test report saved.");
+        } catch (Throwable e) {
+            toast("Could not save test report: " + shortError(e));
+        }
     }
 
     private void loadInstalledApps() {
