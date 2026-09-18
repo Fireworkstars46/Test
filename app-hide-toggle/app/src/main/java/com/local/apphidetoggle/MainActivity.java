@@ -91,24 +91,36 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(16), dp(14), dp(16), dp(8));
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(8), 0, dp(8), 0);
 
-        TextView title = text("App Hide Toggle", 26);
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.VERTICAL);
+        top.setPadding(dp(8), dp(10), dp(8), dp(6));
+
+        TextView title = text("App Hide Toggle", 24);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        header.addView(title);
+        top.addView(title);
 
-        header.addView(text(
-                "Each app has its own Hide/Show and Disable/Enable buttons directly in the app row, so you never have to scroll to controls at the bottom.",
-                14));
-
-        status = text("Not connected", 15);
+        status = text("Not connected", 13);
         status.setSingleLine(true);
         status.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        header.addView(status);
+        top.addView(status);
 
-        Button openWireless = button("Open Developer options / Wireless debugging");
+        LinearLayout setupPanel = new LinearLayout(this);
+        setupPanel.setOrientation(LinearLayout.VERTICAL);
+        setupPanel.setVisibility(View.GONE);
+
+        Button setupToggle = button("Pairing / connection setup");
+        setupToggle.setOnClickListener(v -> {
+            boolean show = setupPanel.getVisibility() != View.VISIBLE;
+            setupPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+            setupToggle.setText(show ? "Hide pairing setup" : "Pairing / connection setup");
+        });
+        top.addView(setupToggle);
+
+        Button openWireless = button("Open Wireless debugging");
         openWireless.setOnClickListener(v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
@@ -116,28 +128,28 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(Settings.ACTION_SETTINGS));
             }
         });
-        header.addView(openWireless);
+        setupPanel.addView(openWireless);
 
         LinearLayout pairRow = new LinearLayout(this);
         pairRow.setOrientation(LinearLayout.HORIZONTAL);
         portInput = new EditText(this);
         portInput.setHint("Pair port");
         portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        pairRow.addView(portInput, new LinearLayout.LayoutParams(0, dp(58), 1));
+        pairRow.addView(portInput, new LinearLayout.LayoutParams(0, dp(54), 1));
 
         codeInput = new EditText(this);
         codeInput.setHint("6-digit code");
         codeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        pairRow.addView(codeInput, new LinearLayout.LayoutParams(0, dp(58), 1));
-        header.addView(pairRow);
+        pairRow.addView(codeInput, new LinearLayout.LayoutParams(0, dp(54), 1));
+        setupPanel.addView(pairRow);
 
         LinearLayout pairButtons = new LinearLayout(this);
         pairButtons.setOrientation(LinearLayout.HORIZONTAL);
         Button findPort = button("Find pair port");
         Button pair = button("Pair");
-        pairButtons.addView(findPort, new LinearLayout.LayoutParams(0, dp(58), 1));
-        pairButtons.addView(pair, new LinearLayout.LayoutParams(0, dp(58), 1));
-        header.addView(pairButtons);
+        pairButtons.addView(findPort, new LinearLayout.LayoutParams(0, dp(54), 1));
+        pairButtons.addView(pair, new LinearLayout.LayoutParams(0, dp(54), 1));
+        setupPanel.addView(pairButtons);
         findPort.setOnClickListener(v -> findPairingPort());
         pair.setOnClickListener(v -> pair());
 
@@ -146,34 +158,34 @@ public class MainActivity extends Activity {
             setStatus("Connecting…");
             executor.submit(this::autoConnect);
         });
-        header.addView(connect);
-
-        TextView appsLabel = text("Installed apps", 17);
-        appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        header.addView(appsLabel);
-
-        header.addView(text(
-                "Eye = launcher icon shown/hidden   •   ✓ = enabled   •   ✕ = disabled",
-                12));
-
-        appCount = text("Scanning installed apps…", 13);
-        header.addView(appCount);
+        setupPanel.addView(connect);
+        top.addView(setupPanel);
 
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
 
         searchInput = new EditText(this);
-        searchInput.setHint("Search app name or package");
+        searchInput.setHint("Search apps");
         searchInput.setSingleLine(true);
-        searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(58), 1));
+        searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(52), 1));
 
         Button rescan = button("Rescan");
-        searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
-        header.addView(searchRow);
+        rescan.setFocusable(false);
+        rescan.setFocusableInTouchMode(false);
+        searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(100), dp(52)));
+        top.addView(searchRow);
 
-        result = text("", 12);
-        result.setTypeface(Typeface.MONOSPACE);
-        result.setTextIsSelectable(true);
+        appCount = text("Scanning installed apps…", 12);
+        top.addView(appCount);
+
+        top.addView(text("Eye = shown/hidden   •   ✓ = enabled   •   ✕ = disabled", 11));
+
+        result = text("", 11);
+        result.setVisibility(View.GONE);
+
+        root.addView(top, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         appList = new ListView(this);
         appList.setVerticalScrollBarEnabled(true);
@@ -183,40 +195,50 @@ public class MainActivity extends Activity {
         appList.setSmoothScrollbarEnabled(true);
         appList.setFastScrollEnabled(true);
         appList.setClipToPadding(true);
-        appList.addHeaderView(header, null, false);
+        appList.setItemsCanFocus(false);
+        appList.setChoiceMode(ListView.CHOICE_MODE_NONE);
+        appList.setFocusable(false);
+        appList.setFocusableInTouchMode(false);
 
         appAdapter = new AppAdapter();
         appList.setAdapter(appAdapter);
 
-
+        root.addView(appList, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 appAdapter.filter(s == null ? "" : s.toString());
-                appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
+                appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size());
             }
             @Override public void afterTextChanged(Editable s) { }
         });
 
         rescan.setOnClickListener(v -> loadInstalledApps());
 
-        appList.setOnApplyWindowInsetsListener((v, insets) -> {
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(dp(6), bars.top + dp(4), bars.right + dp(12), bars.bottom + dp(12));
+            v.setPadding(dp(8), bars.top + dp(2), bars.right + dp(8), bars.bottom + dp(4));
             return insets;
         });
 
-        setContentView(appList);
-        appList.requestApplyInsets();
+        setContentView(root);
+        root.requestApplyInsets();
     }
 
-    private void refreshRowsWithoutJump() {
-        int first = appList.getFirstVisiblePosition();
-        View firstView = appList.getChildAt(0);
-        int top = firstView == null ? 0 : firstView.getTop();
-        appAdapter.notifyDataSetChanged();
-        appList.post(() -> appList.setSelectionFromTop(first, top));
+    private void updateVisibleRow(AppEntry entry) {
+        if (entry == null) return;
+        for (int i = 0; i < appList.getChildCount(); i++) {
+            View child = appList.getChildAt(i);
+            Object tag = child.getTag();
+            if (!(tag instanceof RowHolder)) continue;
+            RowHolder holder = (RowHolder) tag;
+            if (entry.packageName.equals(holder.boundPackage)) {
+                bindRow(holder, entry);
+                return;
+            }
+        }
     }
 
     private void loadInstalledApps() {
@@ -414,6 +436,8 @@ public class MainActivity extends Activity {
         }
 
         boolean show = !entry.launcherShown;
+        entry.busyVisibility = true;
+        updateVisibleRow(entry);
         result.setText("");
         setStatus((show ? "Showing " : "Hiding ") + entry.packageName + "…");
         executor.submit(() -> executeVisibilityToggle(entry, show));
@@ -427,6 +451,8 @@ public class MainActivity extends Activity {
         }
 
         boolean enable = !entry.enabled;
+        entry.busyEnabled = true;
+        updateVisibleRow(entry);
         result.setText("");
         setStatus((enable ? "Enabling " : "Disabling ") + entry.packageName + "…");
         executor.submit(() -> executeEnabledToggle(entry, enable));
@@ -470,13 +496,18 @@ public class MainActivity extends Activity {
             final String finalOutput = output.toString();
             runOnUiThread(() -> {
                 entry.launcherShown = show;
+                entry.busyVisibility = false;
                 result.setText(finalOutput);
-                refreshRowsWithoutJump();
+                updateVisibleRow(entry);
             });
             setStatus((show ? "Shown: " : "Hidden: ") + entry.packageName);
         } catch (Throwable e) {
             String msg = shortError(e);
-            runOnUiThread(() -> result.setText(msg));
+            runOnUiThread(() -> {
+                entry.busyVisibility = false;
+                result.setText(msg);
+                updateVisibleRow(entry);
+            });
             setStatus("Command failed: " + msg);
         }
     }
@@ -498,13 +529,18 @@ public class MainActivity extends Activity {
             final String finalOutput = output;
             runOnUiThread(() -> {
                 entry.enabled = enable;
+                entry.busyEnabled = false;
                 result.setText(finalOutput);
-                refreshRowsWithoutJump();
+                updateVisibleRow(entry);
             });
             setStatus((enable ? "Enabled: " : "Disabled: ") + pkg);
         } catch (Throwable e) {
             String msg = shortError(e);
-            runOnUiThread(() -> result.setText(msg));
+            runOnUiThread(() -> {
+                entry.busyEnabled = false;
+                result.setText(msg);
+                updateVisibleRow(entry);
+            });
             setStatus("Command failed: " + msg);
         }
     }
@@ -550,6 +586,8 @@ public class MainActivity extends Activity {
         final String packageName;
         boolean enabled;
         boolean launcherShown;
+        boolean busyVisibility;
+        boolean busyEnabled;
         final ArrayList<String> launcherComponents;
         final Drawable icon;
 
@@ -572,6 +610,7 @@ public class MainActivity extends Activity {
         final TextView pkg;
         final Button visibilityButton;
         final Button enabledButton;
+        String boundPackage = "";
 
         RowHolder(ImageView visibilityIndicator, ImageView enabledIndicator, ImageView appIcon,
                   TextView name, TextView pkg, Button visibilityButton, Button enabledButton) {
@@ -583,6 +622,41 @@ public class MainActivity extends Activity {
             this.visibilityButton = visibilityButton;
             this.enabledButton = enabledButton;
         }
+    }
+
+    private void bindRow(RowHolder holder, AppEntry entry) {
+        holder.boundPackage = entry.packageName;
+        holder.name.setText(entry.label);
+        holder.pkg.setText(entry.packageName);
+        holder.appIcon.setImageDrawable(entry.icon != null
+                ? entry.icon
+                : getDrawable(android.R.drawable.sym_def_app_icon));
+
+        int tint = holder.name.getCurrentTextColor();
+        holder.visibilityIndicator.setImageTintList(ColorStateList.valueOf(tint));
+        holder.enabledIndicator.setImageTintList(ColorStateList.valueOf(tint));
+
+        boolean hasLauncher = !entry.launcherComponents.isEmpty();
+        holder.visibilityIndicator.setImageResource(entry.launcherShown
+                ? R.drawable.ic_visibility
+                : R.drawable.ic_visibility_off);
+        holder.visibilityIndicator.setAlpha(hasLauncher ? 1f : 0.28f);
+
+        holder.enabledIndicator.setImageResource(entry.enabled
+                ? R.drawable.ic_check
+                : R.drawable.ic_close);
+
+        holder.visibilityButton.setText(entry.busyVisibility
+                ? "Working…"
+                : (entry.launcherShown ? "Hide" : "Show"));
+        holder.visibilityButton.setEnabled(hasLauncher && !entry.busyVisibility);
+        holder.visibilityButton.setOnClickListener(v -> toggleVisibility(entry));
+
+        holder.enabledButton.setText(entry.busyEnabled
+                ? "Working…"
+                : (entry.enabled ? "Disable" : "Enable"));
+        holder.enabledButton.setEnabled(!entry.busyEnabled);
+        holder.enabledButton.setOnClickListener(v -> toggleEnabled(entry));
     }
 
     private class AppAdapter extends BaseAdapter {
@@ -670,11 +744,15 @@ public class MainActivity extends Activity {
                 visibilityButton.setMinHeight(0);
                 visibilityButton.setMinimumHeight(0);
                 visibilityButton.setPadding(dp(4), 0, dp(4), 0);
+                visibilityButton.setFocusable(false);
+                visibilityButton.setFocusableInTouchMode(false);
 
                 Button enabledButton = button("Disable");
                 enabledButton.setMinHeight(0);
                 enabledButton.setMinimumHeight(0);
                 enabledButton.setPadding(dp(4), 0, dp(4), 0);
+                enabledButton.setFocusable(false);
+                enabledButton.setFocusableInTouchMode(false);
 
                 LinearLayout.LayoutParams actionParams1 =
                         new LinearLayout.LayoutParams(0, dp(40), 1);
@@ -700,35 +778,8 @@ public class MainActivity extends Activity {
                 holder = (RowHolder) convertView.getTag();
             }
 
-            holder.name.setText(entry.label);
-            holder.pkg.setText(entry.packageName);
-            holder.appIcon.setImageDrawable(entry.icon != null
-                    ? entry.icon
-                    : getDrawable(android.R.drawable.sym_def_app_icon));
-
-            int tint = holder.name.getCurrentTextColor();
-            holder.visibilityIndicator.setImageTintList(ColorStateList.valueOf(tint));
-            holder.enabledIndicator.setImageTintList(ColorStateList.valueOf(tint));
-
-            boolean hasLauncher = !entry.launcherComponents.isEmpty();
-            holder.visibilityIndicator.setImageResource(entry.launcherShown
-                    ? R.drawable.ic_visibility
-                    : R.drawable.ic_visibility_off);
-            holder.visibilityIndicator.setAlpha(hasLauncher ? 1f : 0.28f);
-
-            holder.enabledIndicator.setImageResource(entry.enabled
-                    ? R.drawable.ic_check
-                    : R.drawable.ic_close);
-            holder.enabledIndicator.setAlpha(1f);
-
-            holder.visibilityButton.setText(entry.launcherShown ? "Hide" : "Show");
-            holder.visibilityButton.setEnabled(hasLauncher);
-            holder.visibilityButton.setOnClickListener(v -> toggleVisibility(entry));
-
-            holder.enabledButton.setText(entry.enabled ? "Disable" : "Enable");
-            holder.enabledButton.setEnabled(true);
-            holder.enabledButton.setOnClickListener(v -> toggleEnabled(entry));
-
+            holder.boundPackage = entry.packageName;
+            bindRow(holder, entry);
             return convertView;
         }
     }
