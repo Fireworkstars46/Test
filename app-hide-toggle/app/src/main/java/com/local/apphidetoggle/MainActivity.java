@@ -617,8 +617,7 @@ public class MainActivity extends Activity {
     }
 
     private AppEntry selectAutomaticTestApp(AdbConnectionManager manager) throws Exception {
-        // Full scan starts automatically when the app opens. Give it a short chance
-        // to finish before selecting a test target.
+        // The full scan runs automatically at startup. Wait briefly for it to populate.
         for (int i = 0; i < 60 && installedApps.isEmpty(); i++) {
             try { Thread.sleep(100); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -628,27 +627,72 @@ public class MainActivity extends Activity {
 
         ArrayList<AppEntry> candidates = new ArrayList<>();
         PackageManager pm = getPackageManager();
+
         for (AppEntry entry : installedApps) {
             if (entry == null
                     || getPackageName().equals(entry.packageName)
                     || !entry.enabled
-                    || !entry.launcherShown
                     || entry.launcherComponents.isEmpty()) {
                 continue;
             }
+
             try {
                 ApplicationInfo ai = pm.getApplicationInfo(
                         entry.packageName, PackageManager.MATCH_DISABLED_COMPONENTS);
                 boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
                         || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
-                if (!system) candidates.add(entry);
+                if (system) continue;
             } catch (Throwable ignored) {
+                continue;
             }
+
+            // Do not trust the app-side launcherShown cache here. v2.5.7 could
+            // mark all launcher apps hidden even though the ADB full scan found
+            // hundreds of valid launcher packages. Ask Android directly.
+            boolean confirmedShown = false;
+            boolean gotAuthoritativeState = false;
+
+            if (manager != null && manager.isConnected()) {
+                for (String activityName : entry.launcherComponents) {
+                    try {
+                        Boolean disabled = queryComponentDisabledViaAdb(
+                                manager,
+                                new ComponentName(entry.packageName, activityName));
+                        if (disabled != null) {
+                            gotAuthoritativeState = true;
+                            if (!disabled) {
+                                confirmedShown = true;
+                                break;
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+
+            // If dumpsys couldn't answer, an Android launch intent is a safe
+            // fallback signal that this is a currently launchable normal app.
+            if (!gotAuthoritativeState) {
+                try {
+                    Intent launchIntent = pm.getLaunchIntentForPackage(entry.packageName);
+                    confirmedShown = launchIntent != null
+                            && launchIntent.getComponent() != null;
+                } catch (Throwable ignored) {
+                    confirmedShown = false;
+                }
+            }
+
+            if (!confirmedShown) continue;
+
+            // Record the verified starting state so the automatic test restores
+            // the app exactly to how it started.
+            entry.launcherShown = true;
+            candidates.add(entry);
         }
 
         if (candidates.isEmpty()) return null;
 
-        // Prefer a user app with no running process.
+        // Prefer a user app with no running process so App OFF is less disruptive.
         if (manager != null && manager.isConnected()) {
             try {
                 String ps = runAdbCommandWithMarker(manager, "ps -A -o NAME", 2500);
