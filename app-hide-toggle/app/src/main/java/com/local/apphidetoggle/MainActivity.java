@@ -1,12 +1,18 @@
 package com.local.apphidetoggle;
 
 import android.app.Activity;
+import android.animation.ValueAnimator;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
@@ -23,7 +29,6 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -430,6 +435,7 @@ public class MainActivity extends Activity {
         boolean previous = entry.launcherShown;
         entry.launcherShown = show;
         entry.busyVisibility = true;
+        updateVisibleRow(entry);
         adbExecutor.submit(() -> executeVisibilityToggle(entry, show, previous));
     }
 
@@ -449,6 +455,7 @@ public class MainActivity extends Activity {
         boolean previous = entry.enabled;
         entry.enabled = enable;
         entry.busyEnabled = true;
+        updateVisibleRow(entry);
         adbExecutor.submit(() -> executeEnabledToggle(entry, enable, previous));
     }
 
@@ -608,18 +615,115 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static class SmoothToggle extends View {
+        interface OnToggleListener {
+            void onToggle(boolean checked);
+        }
+
+        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint thumbPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF trackRect = new RectF();
+        private boolean checked;
+        private float position;
+        private ValueAnimator animator;
+        private OnToggleListener listener;
+
+        SmoothToggle(Context context) {
+            super(context);
+            setClickable(true);
+            setFocusable(false);
+            setFocusableInTouchMode(false);
+            setSoundEffectsEnabled(true);
+            thumbPaint.setColor(Color.WHITE);
+            setOnClickListener(v -> {
+                if (!isEnabled()) return;
+                boolean next = !checked;
+                setState(next, true);
+                if (listener != null) listener.onToggle(next);
+            });
+        }
+
+        void setOnToggleListener(OnToggleListener listener) {
+            this.listener = listener;
+        }
+
+        void setState(boolean checked, boolean animate) {
+            if (this.checked == checked && Math.abs(position - (checked ? 1f : 0f)) < 0.001f) {
+                return;
+            }
+            this.checked = checked;
+            float target = checked ? 1f : 0f;
+            if (animator != null) animator.cancel();
+
+            if (!animate || !isShown()) {
+                position = target;
+                invalidate();
+                return;
+            }
+
+            animator = ValueAnimator.ofFloat(position, target);
+            animator.setDuration(170);
+            animator.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            animator.addUpdateListener(a -> {
+                position = (float) a.getAnimatedValue();
+                invalidate();
+            });
+            animator.start();
+        }
+
+        @Override
+        public void setEnabled(boolean enabled) {
+            super.setEnabled(enabled);
+            setAlpha(enabled ? 1f : 0.55f);
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            float inset = Math.max(1f, h * 0.08f);
+            float radius = h * 0.5f;
+            trackRect.set(inset, inset, w - inset, h - inset);
+
+            int offColor = Color.rgb(105, 105, 105);
+            int onColor = Color.rgb(49, 132, 255);
+            trackPaint.setColor(blend(offColor, onColor, position));
+            canvas.drawRoundRect(trackRect, radius, radius, trackPaint);
+
+            float thumbRadius = h * 0.39f;
+            float left = inset + thumbRadius + h * 0.02f;
+            float right = w - inset - thumbRadius - h * 0.02f;
+            float cx = left + (right - left) * position;
+            float cy = h * 0.5f;
+            canvas.drawCircle(cx, cy, thumbRadius, thumbPaint);
+        }
+
+        private static int blend(int from, int to, float t) {
+            t = Math.max(0f, Math.min(1f, t));
+            int a = (int) (Color.alpha(from) + (Color.alpha(to) - Color.alpha(from)) * t);
+            int r = (int) (Color.red(from) + (Color.red(to) - Color.red(from)) * t);
+            int g = (int) (Color.green(from) + (Color.green(to) - Color.green(from)) * t);
+            int b = (int) (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * t);
+            return Color.argb(a, r, g, b);
+        }
+    }
+
     private static class RowHolder {
         final ImageView visibilityIndicator;
         final ImageView enabledIndicator;
         final ImageView appIcon;
         final TextView name;
         final TextView pkg;
-        final Switch visibilitySwitch;
-        final Switch enabledSwitch;
+        final SmoothToggle visibilitySwitch;
+        final SmoothToggle enabledSwitch;
         String boundPackage = "";
 
         RowHolder(ImageView visibilityIndicator, ImageView enabledIndicator, ImageView appIcon,
-                  TextView name, TextView pkg, Switch visibilitySwitch, Switch enabledSwitch) {
+                  TextView name, TextView pkg, SmoothToggle visibilitySwitch, SmoothToggle enabledSwitch) {
             this.visibilityIndicator = visibilityIndicator;
             this.enabledIndicator = enabledIndicator;
             this.appIcon = appIcon;
@@ -652,12 +756,10 @@ public class MainActivity extends Activity {
                 ? R.drawable.ic_check
                 : R.drawable.ic_close);
 
-        // Clear listeners before setChecked so recycled rows never fire commands while binding.
-        holder.visibilitySwitch.setOnCheckedChangeListener(null);
-        holder.enabledSwitch.setOnCheckedChangeListener(null);
-
-        holder.visibilitySwitch.setChecked(entry.launcherShown);
-        holder.enabledSwitch.setChecked(entry.enabled);
+        // These are fixed-size custom views: state changes only redraw the thumb/track.
+        // They never request focus or layout, which prevents the ListView from jumping.
+        holder.visibilitySwitch.setState(entry.launcherShown, false);
+        holder.enabledSwitch.setState(entry.enabled, false);
 
         holder.visibilitySwitch.setEnabled(hasLauncher && !entry.busyVisibility);
         holder.enabledSwitch.setEnabled(!entry.busyEnabled);
@@ -667,15 +769,13 @@ public class MainActivity extends Activity {
         holder.enabledSwitch.setContentDescription(
                 (entry.enabled ? "Disable " : "Enable ") + entry.label);
 
-        holder.visibilitySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+        holder.visibilitySwitch.setOnToggleListener(isChecked -> {
             if (isChecked == entry.launcherShown) return;
-            buttonView.setEnabled(false);
             toggleVisibility(entry, isChecked);
         });
 
-        holder.enabledSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+        holder.enabledSwitch.setOnToggleListener(isChecked -> {
             if (isChecked == entry.enabled) return;
-            buttonView.setEnabled(false);
             toggleEnabled(entry, isChecked);
         });
     }
@@ -762,35 +862,39 @@ public class MainActivity extends Activity {
                 switches.setOrientation(LinearLayout.HORIZONTAL);
                 switches.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-                Switch visibilitySwitch = new Switch(MainActivity.this);
-                visibilitySwitch.setText("Icon");
-                visibilitySwitch.setTextSize(13);
-                visibilitySwitch.setShowText(false);
-                visibilitySwitch.setSwitchMinWidth(dp(46));
-                visibilitySwitch.setThumbTextPadding(0);
-                visibilitySwitch.setFocusable(false);
-                visibilitySwitch.setFocusableInTouchMode(false);
-                visibilitySwitch.setPadding(0, 0, dp(4), 0);
+                LinearLayout iconControl = new LinearLayout(MainActivity.this);
+                iconControl.setOrientation(LinearLayout.HORIZONTAL);
+                iconControl.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-                Switch enabledSwitch = new Switch(MainActivity.this);
-                enabledSwitch.setText("App");
-                enabledSwitch.setTextSize(13);
-                enabledSwitch.setShowText(false);
-                enabledSwitch.setSwitchMinWidth(dp(46));
-                enabledSwitch.setThumbTextPadding(0);
-                enabledSwitch.setFocusable(false);
-                enabledSwitch.setFocusableInTouchMode(false);
-                enabledSwitch.setPadding(dp(4), 0, 0, 0);
+                TextView iconLabel = text("Icon", 13);
+                iconLabel.setPadding(0, 0, dp(7), 0);
+                iconControl.addView(iconLabel);
+
+                SmoothToggle visibilitySwitch = new SmoothToggle(MainActivity.this);
+                iconControl.addView(visibilitySwitch,
+                        new LinearLayout.LayoutParams(dp(52), dp(32)));
+
+                LinearLayout appControl = new LinearLayout(MainActivity.this);
+                appControl.setOrientation(LinearLayout.HORIZONTAL);
+                appControl.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+                TextView appLabel = text("App", 13);
+                appLabel.setPadding(0, 0, dp(7), 0);
+                appControl.addView(appLabel);
+
+                SmoothToggle enabledSwitch = new SmoothToggle(MainActivity.this);
+                appControl.addView(enabledSwitch,
+                        new LinearLayout.LayoutParams(dp(52), dp(32)));
 
                 LinearLayout.LayoutParams switchParams1 =
-                        new LinearLayout.LayoutParams(0, dp(48), 1);
+                        new LinearLayout.LayoutParams(0, dp(44), 1);
                 switchParams1.setMargins(0, dp(2), dp(4), 0);
-                switches.addView(visibilitySwitch, switchParams1);
+                switches.addView(iconControl, switchParams1);
 
                 LinearLayout.LayoutParams switchParams2 =
-                        new LinearLayout.LayoutParams(0, dp(48), 1);
+                        new LinearLayout.LayoutParams(0, dp(44), 1);
                 switchParams2.setMargins(dp(4), dp(2), 0, 0);
-                switches.addView(enabledSwitch, switchParams2);
+                switches.addView(appControl, switchParams2);
 
                 content.addView(switches, new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
