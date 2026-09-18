@@ -480,11 +480,8 @@ public class MainActivity extends Activity {
             if (manager == null) throw new IllegalStateException("Not connected");
 
             for (String activityName : entry.launcherComponents) {
-                String component = entry.packageName + "/" + activityName;
-                String command = show
-                        ? "pm enable --user 0 " + component
-                        : "pm disable-user --user 0 " + component;
-                runPackageCommandWithRetry(manager, command);
+                ComponentName component = new ComponentName(entry.packageName, activityName);
+                applyComponentState(manager, component, show);
             }
 
             runOnUiThread(() -> {
@@ -508,10 +505,7 @@ public class MainActivity extends Activity {
             AdbConnectionManager manager = requireConnection();
             if (manager == null) throw new IllegalStateException("Not connected");
 
-            String command = enable
-                    ? "pm enable --user 0 " + entry.packageName
-                    : "pm disable-user --user 0 " + entry.packageName;
-            runPackageCommandWithRetry(manager, command);
+            applyPackageState(manager, entry.packageName, enable);
 
             runOnUiThread(() -> {
                 entry.enabled = enable;
@@ -529,17 +523,103 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String runPackageCommandWithRetry(AdbConnectionManager manager, String command) throws Exception {
-        String output;
-        try {
-            output = runShell(manager, "shell:" + command);
-        } catch (Exception first) {
+    private void applyComponentState(AdbConnectionManager manager,
+                                     ComponentName component,
+                                     boolean show) throws Exception {
+        String flat = component.getPackageName() + "/" + component.getClassName();
+        String command = show
+                ? "pm enable --user 0 " + flat
+                : "pm disable-user --user 0 " + flat;
+
+        Throwable last = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
             try {
-                manager.autoConnect(this, 10000);
-            } catch (Throwable ignored) {
+                runPackageCommand(manager, command);
+            } catch (Throwable e) {
+                last = e;
             }
-            output = runShell(manager, "shell:" + command);
+
+            try { Thread.sleep(90); } catch (InterruptedException ignored) { }
+
+            if (isComponentInDesiredState(component, show)) {
+                return;
+            }
+
+            if (attempt == 0) {
+                try { manager.autoConnect(this, 10000); } catch (Throwable ignored) { }
+            }
         }
+
+        if (last instanceof Exception) throw (Exception) last;
+        throw new IllegalStateException("Android did not apply launcher icon change.");
+    }
+
+    private void applyPackageState(AdbConnectionManager manager,
+                                   String pkg,
+                                   boolean enable) throws Exception {
+        String command = enable
+                ? "pm enable --user 0 " + pkg
+                : "pm disable-user --user 0 " + pkg;
+
+        Throwable last = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                runPackageCommand(manager, command);
+            } catch (Throwable e) {
+                last = e;
+            }
+
+            try { Thread.sleep(90); } catch (InterruptedException ignored) { }
+
+            if (isPackageInDesiredState(pkg, enable)) {
+                return;
+            }
+
+            if (attempt == 0) {
+                try { manager.autoConnect(this, 10000); } catch (Throwable ignored) { }
+            }
+        }
+
+        if (last instanceof Exception) throw (Exception) last;
+        throw new IllegalStateException("Android did not apply app enabled state.");
+    }
+
+    private boolean isComponentInDesiredState(ComponentName component, boolean shown) {
+        try {
+            int state = getPackageManager().getComponentEnabledSetting(component);
+            boolean disabled =
+                    state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED;
+            return shown ? !disabled : disabled;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean isPackageInDesiredState(String pkg, boolean enabled) {
+        try {
+            int state = getPackageManager().getApplicationEnabledSetting(pkg);
+            boolean actualEnabled;
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
+                actualEnabled = false;
+            } else if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                actualEnabled = true;
+            } else {
+                ApplicationInfo ai = getPackageManager().getApplicationInfo(
+                        pkg, PackageManager.MATCH_DISABLED_COMPONENTS);
+                actualEnabled = ai.enabled;
+            }
+            return actualEnabled == enabled;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private String runPackageCommand(AdbConnectionManager manager, String command) throws Exception {
+        String output = runShell(manager, "shell:" + command);
 
         String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
         if (lower.contains("securityexception")
