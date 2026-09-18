@@ -29,6 +29,7 @@ import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -478,7 +479,13 @@ public class MainActivity extends Activity {
     private void executeVisibilityToggle(AppEntry entry, boolean show) {
         try {
             AdbConnectionManager manager = requireConnection();
-            if (manager == null) return;
+            if (manager == null) {
+                runOnUiThread(() -> {
+                    entry.busyVisibility = false;
+                    updateVisibleRow(entry);
+                });
+                return;
+            }
 
             StringBuilder output = new StringBuilder();
             for (String activityName : entry.launcherComponents) {
@@ -486,13 +493,31 @@ public class MainActivity extends Activity {
                 String command = show
                         ? "shell:pm enable --user 0 " + component
                         : "shell:pm disable-user --user 0 " + component;
-                String one = runShell(manager, command);
+                String one = runPackageShellChecked(manager, command);
                 if (!one.trim().isEmpty()) output.append(one);
             }
 
             if (output.length() == 0) {
                 output.append(show ? "Launcher icon shown." : "Launcher icon hidden.");
             }
+
+            Thread.sleep(120);
+            boolean actualShown = isLauncherShownNow(entry);
+            if (actualShown != show) {
+                for (String activityName : entry.launcherComponents) {
+                    String component = entry.packageName + "/" + activityName;
+                    String command = show
+                            ? "shell:pm enable --user 0 " + component
+                            : "shell:pm disable-user --user 0 " + component;
+                    runPackageShellChecked(manager, command);
+                }
+                Thread.sleep(180);
+                actualShown = isLauncherShownNow(entry);
+            }
+            if (actualShown != show) {
+                throw new IOException("Android did not apply the launcher visibility change.");
+            }
+
             final String finalOutput = output.toString();
             runOnUiThread(() -> {
                 entry.launcherShown = show;
@@ -515,15 +540,32 @@ public class MainActivity extends Activity {
     private void executeEnabledToggle(AppEntry entry, boolean enable) {
         try {
             AdbConnectionManager manager = requireConnection();
-            if (manager == null) return;
+            if (manager == null) {
+                runOnUiThread(() -> {
+                    entry.busyEnabled = false;
+                    updateVisibleRow(entry);
+                });
+                return;
+            }
 
             String pkg = entry.packageName;
             String command = enable
                     ? "shell:pm enable --user 0 " + pkg
                     : "shell:pm disable-user --user 0 " + pkg;
-            String output = runShell(manager, command);
+            String output = runPackageShellChecked(manager, command);
             if (output.trim().isEmpty()) {
                 output = enable ? "App enabled." : "App disabled.";
+            }
+
+            Thread.sleep(120);
+            boolean actualEnabled = isPackageEnabledNow(pkg);
+            if (actualEnabled != enable) {
+                output = runPackageShellChecked(manager, command);
+                Thread.sleep(180);
+                actualEnabled = isPackageEnabledNow(pkg);
+            }
+            if (actualEnabled != enable) {
+                throw new IOException("Android did not apply the enabled/disabled change.");
             }
 
             final String finalOutput = output;
@@ -542,6 +584,66 @@ public class MainActivity extends Activity {
                 updateVisibleRow(entry);
             });
             setStatus("Command failed: " + msg);
+        }
+    }
+
+    private String runPackageShellChecked(AdbConnectionManager manager, String service) throws Exception {
+        String output;
+        try {
+            output = runShell(manager, service);
+        } catch (Exception first) {
+            try {
+                manager.autoConnect(this, 10000);
+            } catch (Throwable ignored) {
+            }
+            output = runShell(manager, service);
+        }
+
+        String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
+        if (lower.contains("securityexception")
+                || lower.contains("permission denial")
+                || lower.contains("unknown package")
+                || lower.contains("unknown component")
+                || lower.startsWith("error:")
+                || lower.contains("\nerror:")
+                || lower.contains("failed to")) {
+            throw new IOException(output.trim());
+        }
+        return output == null ? "" : output;
+    }
+
+    private boolean isLauncherShownNow(AppEntry entry) {
+        PackageManager pm = getPackageManager();
+        for (String activityName : entry.launcherComponents) {
+            try {
+                ComponentName component = new ComponentName(entry.packageName, activityName);
+                int state = pm.getComponentEnabledSetting(component);
+                if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        || state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return false;
+    }
+
+    private boolean isPackageEnabledNow(String pkg) {
+        PackageManager pm = getPackageManager();
+        try {
+            int state = pm.getApplicationEnabledSetting(pkg);
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
+                return false;
+            }
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                return true;
+            }
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, PackageManager.MATCH_DISABLED_COMPONENTS);
+            return ai.enabled;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
