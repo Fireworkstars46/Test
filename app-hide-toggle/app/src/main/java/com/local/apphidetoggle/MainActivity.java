@@ -998,6 +998,19 @@ public class MainActivity extends Activity {
                         }
                     }
 
+                    // Keep the main list useful:
+                    // - normal/user-installed apps stay listed even if they do not
+                    //   expose a launcher icon, because the App toggle is still useful.
+                    // - system apps are shown only when they have a real/known launcher
+                    //   target, so settings-only features, overlays, navigation helpers,
+                    //   background services, etc. do not clutter the list.
+                    boolean systemPackage =
+                            (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                            || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+                    if (systemPackage && components.isEmpty()) {
+                        continue;
+                    }
+
                     Drawable appIcon;
                     try {
                         appIcon = pm.getApplicationIcon(ai);
@@ -1024,7 +1037,7 @@ public class MainActivity extends Activity {
                     }
                     appCount.setText("Showing " + appAdapter.getCount()
                             + " of " + installedApps.size()
-                            + " installed apps. Launcher targets: "
+                            + " useful apps. Launcher targets: "
                             + launcherTargets + ".");
                 });
             } catch (Throwable e) {
