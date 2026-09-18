@@ -29,6 +29,7 @@ import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,6 +52,7 @@ import io.github.muntashirakon.adb.android.AndroidUtils;
 
 public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ExecutorService adbExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<AppEntry> installedApps = new ArrayList<>();
 
     private TextView status;
@@ -67,7 +69,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         buildUi();
         setStatus("Checking Wireless debugging connection…");
-        executor.submit(this::autoConnect);
+        adbExecutor.submit(this::autoConnect);
         loadInstalledApps();
     }
 
@@ -144,7 +146,7 @@ public class MainActivity extends Activity {
         Button connect = button("Connect / reconnect");
         connect.setOnClickListener(v -> {
             setStatus("Connecting…");
-            executor.submit(this::autoConnect);
+            adbExecutor.submit(this::autoConnect);
         });
         header.addView(connect);
 
@@ -366,7 +368,7 @@ public class MainActivity extends Activity {
         }
 
         setStatus("Pairing…");
-        executor.submit(() -> {
+        adbExecutor.submit(() -> {
             try {
                 AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
                 boolean ok = manager.pair(AndroidUtils.getHostIpAddress(this), port, code);
@@ -421,7 +423,7 @@ public class MainActivity extends Activity {
         boolean show = !entry.launcherShown;
         entry.busyVisibility = true;
         updateVisibleRow(entry);
-        executor.submit(() -> executeVisibilityToggle(entry, show));
+        adbExecutor.submit(() -> executeVisibilityToggle(entry, show));
     }
 
     private void toggleEnabled(AppEntry entry) {
@@ -434,7 +436,7 @@ public class MainActivity extends Activity {
         boolean enable = !entry.enabled;
         entry.busyEnabled = true;
         updateVisibleRow(entry);
-        executor.submit(() -> executeEnabledToggle(entry, enable));
+        adbExecutor.submit(() -> executeEnabledToggle(entry, enable));
     }
 
     private AdbConnectionManager requireConnection() throws Exception {
@@ -471,7 +473,6 @@ public class MainActivity extends Activity {
                 entry.launcherShown = show;
                 entry.busyVisibility = false;
                 updateVisibleRow(entry);
-                toast((show ? "Shown: " : "Hidden: ") + entry.label);
             });
         } catch (Throwable e) {
             String msg = shortError(e);
@@ -497,7 +498,6 @@ public class MainActivity extends Activity {
                 entry.enabled = enable;
                 entry.busyEnabled = false;
                 updateVisibleRow(entry);
-                toast((enable ? "Enabled: " : "Disabled: ") + entry.label);
             });
         } catch (Throwable e) {
             String msg = shortError(e);
@@ -509,16 +509,16 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String runPackageCommandWithRetry(AdbConnectionManager manager, String service) throws Exception {
+    private String runPackageCommandWithRetry(AdbConnectionManager manager, String command) throws Exception {
         String output;
         try {
-            output = runShell(manager, service);
+            output = runInteractiveShellCommand(manager, command);
         } catch (Exception first) {
             try {
                 manager.autoConnect(this, 10000);
             } catch (Throwable ignored) {
             }
-            output = runShell(manager, service);
+            output = runInteractiveShellCommand(manager, command);
         }
 
         String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
@@ -528,25 +528,33 @@ public class MainActivity extends Activity {
                 || lower.contains("unknown component")
                 || lower.startsWith("error:")
                 || lower.contains("\nerror:")
-                || lower.contains("failed to")) {
+                || lower.contains("failed to")
+                || lower.contains("not found")) {
             throw new IllegalStateException(output.trim());
         }
         return output == null ? "" : output;
     }
 
-    private String runShell(AdbConnectionManager manager, String service) throws Exception {
-        AdbStream stream = manager.openStream(service);
-        StringBuilder out = new StringBuilder();
-        try (InputStream in = stream.openInputStream();
-             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                out.append(line).append('\n');
+    private String runInteractiveShellCommand(AdbConnectionManager manager, String command) throws Exception {
+        AdbStream stream = manager.openStream("shell:");
+        StringBuilder text = new StringBuilder();
+        try {
+            OutputStream out = stream.openOutputStream();
+            out.write((command + "\nexit\n").getBytes(StandardCharsets.UTF_8));
+            out.flush();
+
+            try (InputStream in = stream.openInputStream();
+                 BufferedReader reader = new BufferedReader(
+                         new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    text.append(line).append('\n');
+                }
             }
         } finally {
             try { stream.close(); } catch (Exception ignored) { }
         }
-        return out.toString();
+        return text.toString();
     }
 
     private void setStatus(String s) {
@@ -567,6 +575,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         executor.shutdownNow();
+        adbExecutor.shutdownNow();
         super.onDestroy();
     }
 
