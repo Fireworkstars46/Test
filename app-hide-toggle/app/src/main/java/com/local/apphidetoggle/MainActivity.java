@@ -1,14 +1,24 @@
 package com.local.apphidetoggle;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -17,6 +27,10 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,12 +44,15 @@ import io.github.muntashirakon.adb.android.AndroidUtils;
 
 public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ArrayList<AppEntry> installedApps = new ArrayList<>();
 
     private TextView status;
     private TextView result;
     private EditText portInput;
     private EditText codeInput;
-    private EditText packageInput;
+    private TextView appCount;
+    private TextView selectedApp;
+    private String selectedPackage = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,6 +60,7 @@ public class MainActivity extends Activity {
         buildUi();
         setStatus("Checking Wireless debugging connection…");
         executor.submit(this::autoConnect);
+        loadInstalledApps(false);
     }
 
     private int dp(int n) {
@@ -74,7 +92,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView info = text(
-                "Pair once with Android Wireless debugging. Then enter any app package name and hide/disable or show/enable it for user 0. No Shizuku or aShell is needed.",
+                "Pair once with Android Wireless debugging. Choose an installed app from the scanned list, then hide/disable or show/enable it for user 0. No package-name typing, Shizuku, or aShell is needed.",
                 14);
         root.addView(info);
 
@@ -120,15 +138,28 @@ public class MainActivity extends Activity {
         });
         root.addView(connect);
 
-        TextView packageLabel = text("App package name", 16);
-        packageLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(packageLabel);
+        TextView appsLabel = text("Installed apps", 16);
+        appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        root.addView(appsLabel);
 
-        packageInput = new EditText(this);
-        packageInput.setHint("Example: com.android.chrome");
-        packageInput.setSingleLine(true);
-        root.addView(packageInput, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
+        appCount = text("Scanning installed apps…", 13);
+        root.addView(appCount);
+
+        LinearLayout chooserRow = new LinearLayout(this);
+        chooserRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button chooseApp = button("Choose app");
+        Button rescan = button("Rescan");
+        chooserRow.addView(chooseApp, new LinearLayout.LayoutParams(0, dp(60), 2));
+        chooserRow.addView(rescan, new LinearLayout.LayoutParams(0, dp(60), 1));
+        root.addView(chooserRow);
+
+        chooseApp.setOnClickListener(v -> showAppChooser());
+        rescan.setOnClickListener(v -> loadInstalledApps(false));
+
+        selectedApp = text("No app selected", 14);
+        selectedApp.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        selectedApp.setTextIsSelectable(true);
+        root.addView(selectedApp);
 
         TextView warning = text(
                 "Warning: disabling Settings, One UI Home, System UI, or other core packages can make the phone difficult to use. This app refuses to disable itself.",
@@ -153,12 +184,124 @@ public class MainActivity extends Activity {
         result = text("", 13);
         result.setTypeface(Typeface.MONOSPACE);
         result.setTextIsSelectable(true);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(result);
-        root.addView(scroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        result.setMinHeight(dp(90));
+        root.addView(result);
 
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(root);
+        setContentView(scroll);
+    }
+
+    private void loadInstalledApps(boolean openChooserAfter) {
+        runOnUiThread(() -> appCount.setText("Scanning installed apps…"));
+        executor.submit(() -> {
+            ArrayList<AppEntry> found = new ArrayList<>();
+            PackageManager pm = getPackageManager();
+            try {
+                List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS);
+                for (ApplicationInfo ai : apps) {
+                    if ((ai.flags & ApplicationInfo.FLAG_INSTALLED) == 0) continue;
+                    String label;
+                    try {
+                        CharSequence cs = pm.getApplicationLabel(ai);
+                        label = cs == null ? ai.packageName : cs.toString();
+                    } catch (Throwable ignored) {
+                        label = ai.packageName;
+                    }
+
+                    boolean enabled = ai.enabled;
+                    try {
+                        int state = pm.getApplicationEnabledSetting(ai.packageName);
+                        if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                                || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                                || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
+                            enabled = false;
+                        } else if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                            enabled = true;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    found.add(new AppEntry(label, ai.packageName, enabled));
+                }
+
+                found.sort(Comparator
+                        .comparing((AppEntry e) -> e.label.toLowerCase(Locale.ROOT))
+                        .thenComparing(e -> e.packageName));
+
+                runOnUiThread(() -> {
+                    installedApps.clear();
+                    installedApps.addAll(found);
+                    appCount.setText("Found " + installedApps.size() + " installed apps for this phone user.");
+                    updateSelectedAppText();
+                    if (openChooserAfter) showAppChooser();
+                });
+            } catch (Throwable e) {
+                runOnUiThread(() -> appCount.setText("Could not scan apps: " + shortError(e)));
+            }
+        });
+    }
+
+    private void showAppChooser() {
+        if (installedApps.isEmpty()) {
+            loadInstalledApps(true);
+            return;
+        }
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(6), dp(12), dp(6));
+
+        EditText search = new EditText(this);
+        search.setHint("Search app name or package");
+        search.setSingleLine(true);
+        box.addView(search, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
+
+        ListView list = new ListView(this);
+        AppAdapter adapter = new AppAdapter(installedApps);
+        list.setAdapter(adapter);
+        box.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(520)));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Choose installed app")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .create();
+
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            AppEntry entry = adapter.getItem(position);
+            selectedPackage = entry.packageName;
+            updateSelectedAppText();
+            dialog.dismiss();
+        });
+
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                adapter.filter(s == null ? "" : s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+
+        dialog.show();
+    }
+
+    private void updateSelectedAppText() {
+        if (selectedPackage.isEmpty()) {
+            selectedApp.setText("No app selected");
+            return;
+        }
+        for (AppEntry entry : installedApps) {
+            if (entry.packageName.equals(selectedPackage)) {
+                selectedApp.setText("Selected: " + entry.label + " — "
+                        + (entry.enabled ? "Enabled" : "Disabled")
+                        + "\n" + entry.packageName);
+                return;
+            }
+        }
+        selectedApp.setText("Selected package: " + selectedPackage);
     }
 
     private void findPairingPort() {
@@ -241,13 +384,9 @@ public class MainActivity extends Activity {
     }
 
     private void runPackageCommand(boolean enable) {
-        String pkg = packageInput.getText().toString().trim();
+        String pkg = selectedPackage.trim();
         if (pkg.isEmpty()) {
-            toast("Enter an app package name first.");
-            return;
-        }
-        if (!pkg.matches("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")) {
-            toast("That does not look like a valid Android package name.");
+            toast("Tap Choose app and select an installed app first.");
             return;
         }
         if (getPackageName().equals(pkg) && !enable) {
@@ -284,6 +423,7 @@ public class MainActivity extends Activity {
             final String finalOutput = output;
             runOnUiThread(() -> result.setText(finalOutput));
             setStatus(enable ? "Enabled / shown: " + pkg : "Disabled / hidden: " + pkg);
+            loadInstalledApps(false);
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> result.setText(msg));
@@ -325,5 +465,81 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         executor.shutdownNow();
         super.onDestroy();
+    }
+
+    private static class AppEntry {
+        final String label;
+        final String packageName;
+        final boolean enabled;
+
+        AppEntry(String label, String packageName, boolean enabled) {
+            this.label = label;
+            this.packageName = packageName;
+            this.enabled = enabled;
+        }
+    }
+
+    private class AppAdapter extends BaseAdapter {
+        private final ArrayList<AppEntry> source = new ArrayList<>();
+        private final ArrayList<AppEntry> visible = new ArrayList<>();
+
+        AppAdapter(List<AppEntry> apps) {
+            source.addAll(apps);
+            visible.addAll(apps);
+        }
+
+        void filter(String query) {
+            String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+            visible.clear();
+            if (q.isEmpty()) {
+                visible.addAll(source);
+            } else {
+                for (AppEntry e : source) {
+                    if (e.label.toLowerCase(Locale.ROOT).contains(q)
+                            || e.packageName.toLowerCase(Locale.ROOT).contains(q)) {
+                        visible.add(e);
+                    }
+                }
+            }
+            notifyDataSetChanged();
+        }
+
+        @Override public int getCount() { return visible.size(); }
+        @Override public AppEntry getItem(int position) { return visible.get(position); }
+        @Override public long getItemId(int position) { return position; }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            AppEntry entry = getItem(position);
+
+            LinearLayout row = new LinearLayout(MainActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+            ImageView icon = new ImageView(MainActivity.this);
+            try {
+                icon.setImageDrawable(getPackageManager().getApplicationIcon(entry.packageName));
+            } catch (Throwable ignored) {
+                icon.setImageResource(android.R.drawable.sym_def_app_icon);
+            }
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(46), dp(46));
+            iconParams.setMargins(0, 0, dp(10), 0);
+            row.addView(icon, iconParams);
+
+            LinearLayout texts = new LinearLayout(MainActivity.this);
+            texts.setOrientation(LinearLayout.VERTICAL);
+
+            TextView name = text(entry.label + (entry.enabled ? "" : "  [DISABLED]"), 15);
+            name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            texts.addView(name);
+
+            TextView pkg = text(entry.packageName, 12);
+            pkg.setTextIsSelectable(false);
+            texts.addView(pkg);
+
+            row.addView(texts, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            return row;
+        }
     }
 }
