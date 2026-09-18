@@ -400,7 +400,7 @@ public class MainActivity extends Activity {
 
             boolean ok;
             try {
-                ok = manager.autoConnect(this, 10000);
+                ok = manager.autoConnect(this, 3500);
             } catch (AdbPairingRequiredException e) {
                 setStatus("Not paired yet. Open Wireless debugging → Pair device with pairing code.");
                 return;
@@ -462,7 +462,7 @@ public class MainActivity extends Activity {
         if (!manager.isConnected()) {
             setStatus("Connecting…");
             try {
-                if (!manager.autoConnect(this, 10000)) {
+                if (!manager.autoConnect(this, 3500)) {
                     setStatus("Could not connect. Make sure Wireless debugging is ON.");
                     return null;
                 }
@@ -533,23 +533,27 @@ public class MainActivity extends Activity {
 
         Throwable last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
+            AdbStream stream = null;
             try {
-                runPackageCommand(manager, command);
+                stream = manager.openStream("shell:" + command);
+                if (waitForComponentState(component, show, 1200)) {
+                    return;
+                }
             } catch (Throwable e) {
                 last = e;
-            }
-
-            try { Thread.sleep(90); } catch (InterruptedException ignored) { }
-
-            if (isComponentInDesiredState(component, show)) {
-                return;
+                if (isComponentInDesiredState(component, show)) return;
+            } finally {
+                if (stream != null) {
+                    try { stream.close(); } catch (Throwable ignored) { }
+                }
             }
 
             if (attempt == 0) {
-                try { manager.autoConnect(this, 10000); } catch (Throwable ignored) { }
+                try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
             }
         }
 
+        if (isComponentInDesiredState(component, show)) return;
         if (last instanceof Exception) throw (Exception) last;
         throw new IllegalStateException("Android did not apply launcher icon change.");
     }
@@ -563,25 +567,57 @@ public class MainActivity extends Activity {
 
         Throwable last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
+            AdbStream stream = null;
             try {
-                runPackageCommand(manager, command);
+                stream = manager.openStream("shell:" + command);
+                if (waitForPackageState(pkg, enable, 1200)) {
+                    return;
+                }
             } catch (Throwable e) {
                 last = e;
-            }
-
-            try { Thread.sleep(90); } catch (InterruptedException ignored) { }
-
-            if (isPackageInDesiredState(pkg, enable)) {
-                return;
+                if (isPackageInDesiredState(pkg, enable)) return;
+            } finally {
+                if (stream != null) {
+                    try { stream.close(); } catch (Throwable ignored) { }
+                }
             }
 
             if (attempt == 0) {
-                try { manager.autoConnect(this, 10000); } catch (Throwable ignored) { }
+                try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
             }
         }
 
+        if (isPackageInDesiredState(pkg, enable)) return;
         if (last instanceof Exception) throw (Exception) last;
         throw new IllegalStateException("Android did not apply app enabled state.");
+    }
+
+    private boolean waitForComponentState(ComponentName component,
+                                          boolean shown,
+                                          long timeoutMs) {
+        long end = android.os.SystemClock.uptimeMillis() + timeoutMs;
+        do {
+            if (isComponentInDesiredState(component, shown)) return true;
+            try { Thread.sleep(35); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return isComponentInDesiredState(component, shown);
+            }
+        } while (android.os.SystemClock.uptimeMillis() < end);
+        return isComponentInDesiredState(component, shown);
+    }
+
+    private boolean waitForPackageState(String pkg,
+                                        boolean enabled,
+                                        long timeoutMs) {
+        long end = android.os.SystemClock.uptimeMillis() + timeoutMs;
+        do {
+            if (isPackageInDesiredState(pkg, enabled)) return true;
+            try { Thread.sleep(35); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return isPackageInDesiredState(pkg, enabled);
+            }
+        } while (android.os.SystemClock.uptimeMillis() < end);
+        return isPackageInDesiredState(pkg, enabled);
     }
 
     private boolean isComponentInDesiredState(ComponentName component, boolean shown) {
@@ -616,23 +652,6 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
             return false;
         }
-    }
-
-    private String runPackageCommand(AdbConnectionManager manager, String command) throws Exception {
-        String output = runShell(manager, "shell:" + command);
-
-        String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
-        if (lower.contains("securityexception")
-                || lower.contains("permission denial")
-                || lower.contains("unknown package")
-                || lower.contains("unknown component")
-                || lower.startsWith("error:")
-                || lower.contains("\nerror:")
-                || lower.contains("failed to")
-                || lower.contains("not found")) {
-            throw new IllegalStateException(output.trim());
-        }
-        return output == null ? "" : output;
     }
 
     private String runShell(AdbConnectionManager manager, String service) throws Exception {
@@ -717,7 +736,6 @@ public class MainActivity extends Activity {
                 if (!isEnabled()) return;
                 boolean next = !checked;
                 setState(next, true);
-                setEnabled(false);
                 if (listener != null) listener.onToggle(next);
             });
         }
@@ -840,8 +858,8 @@ public class MainActivity extends Activity {
         holder.visibilitySwitch.setState(entry.launcherShown, false);
         holder.enabledSwitch.setState(entry.enabled, false);
 
-        holder.visibilitySwitch.setEnabled(hasLauncher && !entry.busyVisibility);
-        holder.enabledSwitch.setEnabled(!entry.busyEnabled);
+        holder.visibilitySwitch.setEnabled(hasLauncher);
+        holder.enabledSwitch.setEnabled(true);
 
         holder.visibilitySwitch.setContentDescription(
                 (entry.launcherShown ? "Hide " : "Show ") + entry.label + " launcher icon");
