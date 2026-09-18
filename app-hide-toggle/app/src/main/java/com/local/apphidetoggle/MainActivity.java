@@ -65,7 +65,6 @@ public class MainActivity extends Activity {
     private AppAdapter appAdapter;
     private Button visibilityToggleButton;
     private Button enabledToggleButton;
-    private ScrollView pageScroll;
     private String selectedPackage = "";
 
     @Override
