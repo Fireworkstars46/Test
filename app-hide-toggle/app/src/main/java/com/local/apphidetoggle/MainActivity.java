@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.animation.ValueAnimator;
 import android.content.ComponentName;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -20,9 +21,11 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Process;
 import android.net.Uri;
 import android.provider.Settings;
+import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -548,13 +551,11 @@ public class MainActivity extends Activity {
             });
         }
 
-        // Save Test Report button/file-writing path.
+        // Save Test Report path: v2.5.7 writes directly to Downloads/AppHideToggle
+        // with MediaStore, so it no longer depends on the Android document picker.
         try {
-            Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
-            saveIntent.setType("text/plain");
-            boolean pickerOk = getPackageManager().resolveActivity(
-                    saveIntent, PackageManager.MATCH_DEFAULT_ONLY) != null;
+            boolean mediaStoreReady = MediaStore.Downloads.EXTERNAL_CONTENT_URI != null
+                    && getContentResolver() != null;
 
             String probe = "App Hide Toggle report-write self-test";
             try (OutputStream out = openFileOutput(
@@ -564,15 +565,15 @@ public class MainActivity extends Activity {
             }
             deleteFile("aht-report-selftest.tmp");
 
-            if (pickerOk) {
-                lines.add("✅ Save Test Report button/file writing: PASS");
+            if (mediaStoreReady) {
+                lines.add("✅ Save Test Report direct-download path: PASS");
                 passed++;
             } else {
-                lines.add("❌ Save Test Report picker: FAIL");
+                lines.add("❌ Save Test Report direct-download path: FAIL");
                 failed++;
             }
         } catch (Throwable e) {
-            lines.add("❌ Save Test Report button/file writing: FAIL — "
+            lines.add("❌ Save Test Report direct-download path: FAIL — "
                     + shortError(e));
             failed++;
         }
@@ -597,9 +598,21 @@ public class MainActivity extends Activity {
 
         publishTestResult(testResult, lines, passed, failed, false);
 
+        // Automatically save the finished report. The button below can save another
+        // copy at any time without opening a file picker.
+        String autoSavedPath = saveReportToDownloads(latestTestReport, false);
         runOnUiThread(() -> {
             runButton.setEnabled(true);
             saveButton.setEnabled(!latestTestReport.isEmpty());
+            if (autoSavedPath != null) {
+                Toast.makeText(this,
+                        "Test finished — report saved to " + autoSavedPath,
+                        Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this,
+                        "Test finished. Auto-save failed; tap Save Test Report to retry.",
+                        Toast.LENGTH_LONG).show();
+            }
         });
     }
 
@@ -741,45 +754,61 @@ public class MainActivity extends Activity {
 
     private void saveLatestTestReport() {
         if (latestTestReport == null || latestTestReport.trim().isEmpty()) {
-            toast("Run the self-test first.");
+            toast("Run the full automatic test first.");
             return;
+        }
+
+        // Small text file, but do the storage work off the UI thread.
+        executor.submit(() -> saveReportToDownloads(latestTestReport, true));
+    }
+
+    private String saveReportToDownloads(String report, boolean showToast) {
+        if (report == null || report.trim().isEmpty()) {
+            if (showToast) toast("No finished test report to save.");
+            return null;
         }
 
         String stamp = new SimpleDateFormat(
-                "yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
-        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/plain");
-        intent.putExtra(Intent.EXTRA_TITLE,
-                "AppHideToggle-Test-Report-" + stamp + ".txt");
+                "yyyy-MM-dd_HH-mm-ss_SSS", Locale.US).format(new Date());
+        String fileName = "AppHideToggle-Test-Report-" + stamp + ".txt";
+        String relativePath = Environment.DIRECTORY_DOWNLOADS + "/AppHideToggle";
+        Uri uri = null;
+
         try {
-            startActivityForResult(intent, REQUEST_SAVE_TEST_REPORT);
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+            uri = getContentResolver().insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                throw new IllegalStateException("Android could not create the report file");
+            }
+
+            try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+                if (out == null) {
+                    throw new IllegalStateException("Android could not open the report file");
+                }
+                out.write(report.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+
+            ContentValues ready = new ContentValues();
+            ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+
+            String shownPath = "Downloads/AppHideToggle/" + fileName;
+            if (showToast) toast("Test report saved to " + shownPath);
+            return shownPath;
         } catch (Throwable e) {
-            toast("Could not open file picker: " + shortError(e));
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_SAVE_TEST_REPORT || resultCode != RESULT_OK
-                || data == null) {
-            return;
-        }
-
-        Uri uri = data.getData();
-        if (uri == null) {
-            toast("No save location selected.");
-            return;
-        }
-
-        try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
-            if (out == null) throw new IllegalStateException("Could not open output file");
-            out.write(latestTestReport.getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            toast("Test report saved.");
-        } catch (Throwable e) {
-            toast("Could not save test report: " + shortError(e));
+            if (uri != null) {
+                try { getContentResolver().delete(uri, null, null); }
+                catch (Throwable ignored) { }
+            }
+            if (showToast) toast("Could not save test report: " + shortError(e));
+            return null;
         }
     }
 
