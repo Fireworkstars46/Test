@@ -1,9 +1,11 @@
 package com.local.apphidetoggle;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -29,8 +31,10 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -57,6 +61,8 @@ public class MainActivity extends Activity {
     private TextView selectedApp;
     private ListView appList;
     private AppAdapter appAdapter;
+    private Button visibilityToggleButton;
+    private Button enabledToggleButton;
     private ScrollView pageScroll;
     private String selectedPackage = "";
 
@@ -98,7 +104,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         root.addView(text(
-                "Pair once with Android Wireless debugging. Installed apps are scanned automatically below. Tap an app in the list, then hide it or show it for user 0.",
+                "Pair once with Android Wireless debugging. Tap an app below. The first button toggles its launcher icon between Shown and Hidden. The second button toggles the whole app between Enabled and Disabled.",
                 14));
 
         status = text("Not connected", 15);
@@ -200,19 +206,21 @@ public class MainActivity extends Activity {
         root.addView(selectedApp);
 
         root.addView(text(
-                "Warning: hiding Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide itself.",
+                "Warning: hiding or disabling Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide or disable itself.",
                 13));
 
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button hide = button("Hide app");
-        Button show = button("Show app");
-        actionRow.addView(hide, new LinearLayout.LayoutParams(0, dp(60), 1));
-        actionRow.addView(show, new LinearLayout.LayoutParams(0, dp(60), 1));
+        visibilityToggleButton = button("Hide / Show");
+        enabledToggleButton = button("Disable / Enable");
+        actionRow.addView(visibilityToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
+        actionRow.addView(enabledToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
         root.addView(actionRow);
 
-        hide.setOnClickListener(v -> runPackageCommand(false));
-        show.setOnClickListener(v -> runPackageCommand(true));
+        visibilityToggleButton.setEnabled(false);
+        enabledToggleButton.setEnabled(false);
+        visibilityToggleButton.setOnClickListener(v -> toggleSelectedVisibility());
+        enabledToggleButton.setOnClickListener(v -> toggleSelectedEnabled());
 
         TextView resultLabel = text("Result", 16);
         resultLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -251,6 +259,19 @@ public class MainActivity extends Activity {
             PackageManager pm = getPackageManager();
 
             try {
+                Map<String, ArrayList<String>> launcherComponents = new HashMap<>();
+                Intent launcherQuery = new Intent(Intent.ACTION_MAIN);
+                launcherQuery.addCategory(Intent.CATEGORY_LAUNCHER);
+                List<ResolveInfo> launchers = pm.queryIntentActivities(
+                        launcherQuery, PackageManager.MATCH_DISABLED_COMPONENTS);
+                for (ResolveInfo ri : launchers) {
+                    if (ri.activityInfo == null || ri.activityInfo.packageName == null
+                            || ri.activityInfo.name == null) continue;
+                    launcherComponents
+                            .computeIfAbsent(ri.activityInfo.packageName, k -> new ArrayList<>())
+                            .add(ri.activityInfo.name);
+                }
+
                 List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS);
                 for (ApplicationInfo ai : apps) {
                     if ((ai.flags & ApplicationInfo.FLAG_INSTALLED) == 0) continue;
@@ -277,7 +298,29 @@ public class MainActivity extends Activity {
                     } catch (Throwable ignored) {
                     }
 
-                    found.add(new AppEntry(label, ai.packageName, enabled));
+                    ArrayList<String> components = launcherComponents.get(ai.packageName);
+                    if (components == null) components = new ArrayList<>();
+
+                    boolean launcherShown = false;
+                    for (String activityName : components) {
+                        try {
+                            int componentState = pm.getComponentEnabledSetting(
+                                    new ComponentName(ai.packageName, activityName));
+                            boolean componentDisabled =
+                                    componentState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                                    || componentState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                                    || componentState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED;
+                            if (!componentDisabled) {
+                                launcherShown = true;
+                                break;
+                            }
+                        } catch (Throwable ignored) {
+                            launcherShown = true;
+                            break;
+                        }
+                    }
+
+                    found.add(new AppEntry(label, ai.packageName, enabled, launcherShown, components));
                 }
 
                 found.sort(Comparator
@@ -302,20 +345,37 @@ public class MainActivity extends Activity {
     private void updateSelectedAppText() {
         if (selectedPackage.isEmpty()) {
             selectedApp.setText("No app selected");
+            visibilityToggleButton.setEnabled(false);
+            visibilityToggleButton.setText("Hide / Show");
+            enabledToggleButton.setEnabled(false);
+            enabledToggleButton.setText("Disable / Enable");
             return;
         }
 
         for (AppEntry entry : installedApps) {
             if (entry.packageName.equals(selectedPackage)) {
-                selectedApp.setText("Selected: " + entry.label + " — "
-                        + (entry.enabled ? "Visible" : "Hidden")
+                String iconState = entry.launcherComponents.isEmpty()
+                        ? "No launcher icon"
+                        : (entry.launcherShown ? "Shown" : "Hidden");
+                String appState = entry.enabled ? "Enabled" : "Disabled";
+                selectedApp.setText("Selected: " + entry.label
+                        + "\nIcon: " + iconState + "   •   App: " + appState
                         + "\n" + entry.packageName);
+
+                visibilityToggleButton.setEnabled(!entry.launcherComponents.isEmpty());
+                visibilityToggleButton.setText(entry.launcherShown ? "Hide app" : "Show app");
+                enabledToggleButton.setEnabled(true);
+                enabledToggleButton.setText(entry.enabled ? "Disable app" : "Enable app");
                 return;
             }
         }
 
         selectedPackage = "";
         selectedApp.setText("No app selected");
+        visibilityToggleButton.setEnabled(false);
+        visibilityToggleButton.setText("Hide / Show");
+        enabledToggleButton.setEnabled(false);
+        enabledToggleButton.setText("Disable / Enable");
     }
 
     private void findPairingPort() {
@@ -404,48 +464,113 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void runPackageCommand(boolean enable) {
-        String pkg = selectedPackage.trim();
-        if (pkg.isEmpty()) {
+    private AppEntry findSelectedEntry() {
+        for (AppEntry entry : installedApps) {
+            if (entry.packageName.equals(selectedPackage)) return entry;
+        }
+        return null;
+    }
+
+    private void toggleSelectedVisibility() {
+        AppEntry entry = findSelectedEntry();
+        if (entry == null) {
             toast("Tap an app in the installed-app list first.");
             return;
         }
-
-        if (getPackageName().equals(pkg) && !enable) {
+        if (entry.launcherComponents.isEmpty()) {
+            toast("This app has no launcher icon to hide or show.");
+            return;
+        }
+        if (getPackageName().equals(entry.packageName) && entry.launcherShown) {
             toast("App Hide Toggle will not hide itself.");
             return;
         }
 
+        boolean show = !entry.launcherShown;
         result.setText("");
-        setStatus((enable ? "Showing " : "Hiding ") + pkg + "…");
-        executor.submit(() -> executePackageCommand(pkg, enable));
+        setStatus((show ? "Showing " : "Hiding ") + entry.packageName + "…");
+        executor.submit(() -> executeVisibilityToggle(entry, show));
     }
 
-    private void executePackageCommand(String pkg, boolean enable) {
-        try {
-            AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
-            if (!manager.isConnected()) {
-                setStatus("Connecting…");
-                try {
-                    if (!manager.autoConnect(this, 10000)) {
-                        setStatus("Could not connect. Make sure Wireless debugging is ON.");
-                        return;
-                    }
-                } catch (AdbPairingRequiredException e) {
-                    setStatus("Pair this app first.");
-                    return;
+    private void toggleSelectedEnabled() {
+        AppEntry entry = findSelectedEntry();
+        if (entry == null) {
+            toast("Tap an app in the installed-app list first.");
+            return;
+        }
+        if (getPackageName().equals(entry.packageName) && entry.enabled) {
+            toast("App Hide Toggle will not disable itself.");
+            return;
+        }
+
+        boolean enable = !entry.enabled;
+        result.setText("");
+        setStatus((enable ? "Enabling " : "Disabling ") + entry.packageName + "…");
+        executor.submit(() -> executeEnabledToggle(entry.packageName, enable));
+    }
+
+    private AdbConnectionManager requireConnection() throws Exception {
+        AdbConnectionManager manager = AdbConnectionManager.getInstance(this);
+        if (!manager.isConnected()) {
+            setStatus("Connecting…");
+            try {
+                if (!manager.autoConnect(this, 10000)) {
+                    setStatus("Could not connect. Make sure Wireless debugging is ON.");
+                    return null;
                 }
+            } catch (AdbPairingRequiredException e) {
+                setStatus("Pair this app first.");
+                return null;
             }
+        }
+        return manager;
+    }
+
+    private void executeVisibilityToggle(AppEntry entry, boolean show) {
+        try {
+            AdbConnectionManager manager = requireConnection();
+            if (manager == null) return;
+
+            StringBuilder output = new StringBuilder();
+            for (String activityName : entry.launcherComponents) {
+                String component = entry.packageName + "/" + activityName;
+                String command = show
+                        ? "shell:pm enable --user 0 " + component
+                        : "shell:pm disable-user --user 0 " + component;
+                String one = runShell(manager, command);
+                if (!one.trim().isEmpty()) output.append(one);
+            }
+
+            if (output.length() == 0) {
+                output.append(show ? "Launcher icon shown." : "Launcher icon hidden.");
+            }
+            final String finalOutput = output.toString();
+            runOnUiThread(() -> result.setText(finalOutput));
+            setStatus((show ? "Shown: " : "Hidden: ") + entry.packageName);
+            loadInstalledApps();
+        } catch (Throwable e) {
+            String msg = shortError(e);
+            runOnUiThread(() -> result.setText(msg));
+            setStatus("Command failed: " + msg);
+        }
+    }
+
+    private void executeEnabledToggle(String pkg, boolean enable) {
+        try {
+            AdbConnectionManager manager = requireConnection();
+            if (manager == null) return;
 
             String command = enable
                     ? "shell:pm enable --user 0 " + pkg
                     : "shell:pm disable-user --user 0 " + pkg;
             String output = runShell(manager, command);
-            if (output.trim().isEmpty()) output = "Command completed with no text output.";
+            if (output.trim().isEmpty()) {
+                output = enable ? "App enabled." : "App disabled.";
+            }
 
             final String finalOutput = output;
             runOnUiThread(() -> result.setText(finalOutput));
-            setStatus(enable ? "Visible: " + pkg : "Hidden: " + pkg);
+            setStatus((enable ? "Enabled: " : "Disabled: ") + pkg);
             loadInstalledApps();
         } catch (Throwable e) {
             String msg = shortError(e);
@@ -494,11 +619,16 @@ public class MainActivity extends Activity {
         final String label;
         final String packageName;
         final boolean enabled;
+        final boolean launcherShown;
+        final ArrayList<String> launcherComponents;
 
-        AppEntry(String label, String packageName, boolean enabled) {
+        AppEntry(String label, String packageName, boolean enabled,
+                 boolean launcherShown, ArrayList<String> launcherComponents) {
             this.label = label;
             this.packageName = packageName;
             this.enabled = enabled;
+            this.launcherShown = launcherShown;
+            this.launcherComponents = new ArrayList<>(launcherComponents);
         }
     }
 
@@ -560,8 +690,11 @@ public class MainActivity extends Activity {
             LinearLayout texts = new LinearLayout(MainActivity.this);
             texts.setOrientation(LinearLayout.VERTICAL);
 
-            String state = entry.enabled ? "Visible" : "Hidden";
-            TextView name = text(entry.label + "  [" + state + "]", 15);
+            String iconState = entry.launcherComponents.isEmpty()
+                    ? "No icon"
+                    : (entry.launcherShown ? "Shown" : "Hidden");
+            String appState = entry.enabled ? "Enabled" : "Disabled";
+            TextView name = text(entry.label + "  [Icon: " + iconState + " | App: " + appState + "]", 15);
             name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             texts.addView(name);
 
