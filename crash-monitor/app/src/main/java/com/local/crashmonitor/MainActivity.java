@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -29,6 +30,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,8 +44,10 @@ import io.github.muntashirakon.adb.android.AndroidUtils;
 public class MainActivity extends Activity {
     private static final int SAVE_REQUEST = 42;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 46;
-    private static final int PREVIEW_IMPORTANT_BYTES = 120_000;
-    private static final int PREVIEW_RAW_BYTES = 260_000;
+    private static final int PREVIEW_IMPORTANT_BYTES = 80_000;
+    private static final int PREVIEW_RAW_BYTES = 180_000;
+    private static final int PREVIEW_IMPORTANT_LINES = 200;
+    private static final int PREVIEW_RAW_LINES = 900;
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -54,6 +59,7 @@ public class MainActivity extends Activity {
     private Switch masterSwitch;
     private Button startMonitoringButton;
     private Button stopMonitoringButton;
+    private ScrollView pageScroll;
     private boolean changingMasterProgrammatically;
 
     private final Runnable refreshTask = new Runnable() {
@@ -248,7 +254,7 @@ public class MainActivity extends Activity {
         copy.setOnClickListener(v -> copyLogs());
         save.setOnClickListener(v -> saveLogs());
 
-        TextView label = text("Important events + latest raw log", 16);
+        TextView label = text("Important events + latest raw log (preview)", 16);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(label);
 
@@ -266,10 +272,14 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        ScrollView pageScroll = new ScrollView(this);
+        pageScroll = new ScrollView(this);
         pageScroll.setFillViewport(true);
         pageScroll.setVerticalScrollBarEnabled(true);
         pageScroll.setScrollbarFadingEnabled(false);
+        pageScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
+        pageScroll.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
+        pageScroll.setPadding(0, 0, dp(6), 0);
+        pageScroll.setClipToPadding(false);
         pageScroll.addView(root, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
@@ -364,18 +374,55 @@ public class MainActivity extends Activity {
         String state = prefs.getString(MonitoringService.PREF_STATE,
                 enabled ? "Crash Monitor service starting…" : "Master OFF — logging and ADB connection are off. Pairing is saved.");
         status.setText(state);
-        logView.setText(readPreview());
+        String preview = readPreview();
+        if (!preview.contentEquals(logView.getText())) {
+            int oldScrollY = pageScroll == null ? 0 : pageScroll.getScrollY();
+            logView.setText(preview);
+            if (pageScroll != null) {
+                pageScroll.post(() -> pageScroll.scrollTo(0, oldScrollY));
+            }
+        }
         updateMonitoringButtons();
     }
 
     private String readPreview() {
-        String important = readTail(new File(getFilesDir(), MonitoringService.IMPORTANT_FILE), PREVIEW_IMPORTANT_BYTES);
-        String raw = readTail(new File(getFilesDir(), MonitoringService.LOG_FILE), PREVIEW_RAW_BYTES);
+        String important = keepLastLines(
+                readTail(new File(getFilesDir(), MonitoringService.IMPORTANT_FILE), PREVIEW_IMPORTANT_BYTES),
+                PREVIEW_IMPORTANT_LINES);
+        String raw = keepLastLines(
+                readTail(new File(getFilesDir(), MonitoringService.LOG_FILE), PREVIEW_RAW_BYTES),
+                PREVIEW_RAW_LINES);
+
+        // Important events are copied from the raw log. Hide those exact lines from
+        // the raw preview so the same event is not shown twice on screen.
+        Set<String> importantLines = new HashSet<>();
+        for (String line : important.split("\n")) {
+            if (!line.trim().isEmpty()) importantLines.add(line);
+        }
+
+        StringBuilder filteredRaw = new StringBuilder();
+        for (String line : raw.split("\n")) {
+            if (!importantLines.contains(line)) filteredRaw.append(line).append('\n');
+        }
+
         StringBuilder out = new StringBuilder();
-        out.append("=== IMPORTANT EVENTS ===\n");
+        out.append("=== IMPORTANT EVENTS — LATEST ").append(PREVIEW_IMPORTANT_LINES).append(" LINES MAX ===\n");
         out.append(important.isEmpty() ? "(none detected yet)\n" : important);
-        out.append("\n=== FULL RAW LOG — LATEST ENTRIES ===\n");
-        out.append(raw.isEmpty() ? "(no log data yet)\n" : raw);
+        out.append("\n=== RAW LOG — LATEST ").append(PREVIEW_RAW_LINES)
+                .append(" LINES MAX (important duplicates omitted) ===\n");
+        out.append(filteredRaw.length() == 0 ? "(no additional raw log data yet)\n" : filteredRaw);
+        out.append("\n[Screen preview is capped for smooth scrolling. Save full TXT keeps the complete log.]\n");
+        return out.toString();
+    }
+
+    private String keepLastLines(String text, int maxLines) {
+        if (text == null || text.isEmpty()) return "";
+        String[] lines = text.split("\n");
+        int start = Math.max(0, lines.length - maxLines);
+        StringBuilder out = new StringBuilder();
+        for (int i = start; i < lines.length; i++) {
+            out.append(lines[i]).append('\n');
+        }
         return out.toString();
     }
 
