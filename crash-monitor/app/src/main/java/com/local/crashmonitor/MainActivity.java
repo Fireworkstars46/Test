@@ -393,12 +393,12 @@ public class MainActivity extends Activity {
     }
 
     private String readPreview() {
-        String important = keepLastLines(
+        String important = dedupeExactLines(keepLastLines(
                 readTail(new File(getFilesDir(), MonitoringService.IMPORTANT_FILE), PREVIEW_IMPORTANT_BYTES),
-                PREVIEW_IMPORTANT_LINES);
-        String raw = keepLastLines(
+                PREVIEW_IMPORTANT_LINES));
+        String raw = dedupeExactLines(keepLastLines(
                 readTail(new File(getFilesDir(), MonitoringService.LOG_FILE), PREVIEW_RAW_BYTES),
-                PREVIEW_RAW_LINES);
+                PREVIEW_RAW_LINES));
 
         // Important events are copied from the raw log. Hide those exact lines from
         // the raw preview so the same event is not shown twice on screen.
@@ -425,6 +425,17 @@ public class MainActivity extends Activity {
                 .append(" LINES MAX (important duplicates omitted) ===\n");
         out.append(filteredRaw.length() == 0 ? "(no additional raw log data yet)\n" : filteredRaw);
         out.append("\n[Screen preview is capped for smooth scrolling. Save full TXT keeps the complete log.]\n");
+        return out.toString();
+    }
+
+    private String dedupeExactLines(String text) {
+        if (text == null || text.isEmpty()) return "";
+        Set<String> seen = new HashSet<>();
+        StringBuilder out = new StringBuilder();
+        for (String line : text.split("\n")) {
+            if (line.trim().isEmpty()) continue;
+            if (seen.add(line)) out.append(line).append('\n');
+        }
         return out.toString();
     }
 
