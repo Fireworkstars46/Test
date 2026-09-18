@@ -236,7 +236,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(20), dp(8), dp(20), dp(8));
 
         TextView info = text(
-                "Safe self-test checks the app scanner, saved Wireless ADB connection, and both OFF/ON ADB component commands using App Hide Toggle's private test component. It does not disable App Hide Toggle itself.",
+                "Safe test never changes App Hide Toggle or any other app. Full toggle test lets you choose a normal user app, briefly tests Icon OFF/ON and App OFF/ON, then restores it.",
                 14);
         box.addView(info);
 
@@ -245,8 +245,11 @@ public class MainActivity extends Activity {
         testResult.setTextIsSelectable(true);
         box.addView(testResult);
 
-        Button run = button("Run safe self-test");
-        box.addView(run);
+        Button safeRun = button("Run safe connection test");
+        box.addView(safeRun);
+
+        Button fullRun = button("Run full toggle test…");
+        box.addView(fullRun);
 
         Button saveReport = button("Save Test Report");
         saveReport.setEnabled(false);
@@ -259,23 +262,30 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Close", null)
                 .create();
 
-        run.setOnClickListener(v -> {
-            run.setEnabled(false);
+        safeRun.setOnClickListener(v -> {
+            safeRun.setEnabled(false);
+            fullRun.setEnabled(false);
             saveReport.setEnabled(false);
             latestTestReport = "";
-            testResult.setText("⏳ Starting safe self-test…");
-            adbExecutor.submit(() -> runSafeSelfTest(testResult, run, saveReport));
+            testResult.setText("⏳ Starting safe test…");
+            adbExecutor.submit(() ->
+                    runSafeSelfTest(testResult, safeRun, fullRun, saveReport));
         });
+
+        fullRun.setOnClickListener(v ->
+                chooseFullTestApp(testResult, safeRun, fullRun, saveReport));
 
         dialog.show();
     }
 
-    private void runSafeSelfTest(TextView testResult, Button runButton, Button saveButton) {
+    private void runSafeSelfTest(TextView testResult,
+                                 Button safeButton,
+                                 Button fullButton,
+                                 Button saveButton) {
         ArrayList<String> lines = new ArrayList<>();
         int passed = 0;
         int failed = 0;
 
-        // 1) Local app scan / PackageManager access.
         try {
             int count = getPackageManager()
                     .getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS)
@@ -293,7 +303,6 @@ public class MainActivity extends Activity {
         }
         publishTestResult(testResult, lines, passed, failed, true);
 
-        // 2) Wireless ADB connection.
         AdbConnectionManager manager = null;
         try {
             manager = AdbConnectionManager.getInstance(this);
@@ -315,83 +324,214 @@ public class MainActivity extends Activity {
         }
         publishTestResult(testResult, lines, passed, failed, true);
 
-        // 3) Safe ADB OFF/ON command test using a private component in this app.
-        ComponentName target = new ComponentName(
-                getPackageName(), getPackageName() + ".TestToggleTarget");
-
-        boolean componentOffPassed = false;
-        boolean componentOnPassed = false;
-
         if (manager != null && manager.isConnected()) {
             try {
-                applyComponentState(manager, target, false);
-                componentOffPassed = true;
-                if (componentOffPassed) {
-                    lines.add("✅ OFF command: PASS");
+                String output = runAdbCommandWithMarker(
+                        manager, "pm path " + getPackageName(), 1500);
+                if (output.toLowerCase(Locale.ROOT).contains("package:")) {
+                    lines.add("✅ ADB shell + Package Manager: PASS");
                     passed++;
                 } else {
-                    lines.add("❌ OFF command: FAIL");
+                    lines.add("❌ ADB shell + Package Manager: FAIL — "
+                            + compactReply(output));
                     failed++;
                 }
             } catch (Throwable e) {
-                lines.add("❌ OFF command: FAIL — " + shortError(e));
+                lines.add("❌ ADB shell + Package Manager: FAIL — " + shortError(e));
+                failed++;
+            }
+        } else {
+            lines.add("⏭ ADB shell + Package Manager: SKIPPED");
+        }
+
+        lines.add("ℹ Safe test made no app/component state changes.");
+        lines.add(failed == 0
+                ? "✅ RESULT: Connection and command path are working."
+                : "❌ RESULT: One or more safe checks failed.");
+
+        publishTestResult(testResult, lines, passed, failed, false);
+        runOnUiThread(() -> {
+            safeButton.setEnabled(true);
+            fullButton.setEnabled(true);
+            saveButton.setEnabled(!latestTestReport.isEmpty());
+        });
+    }
+
+    private void chooseFullTestApp(TextView testResult,
+                                   Button safeButton,
+                                   Button fullButton,
+                                   Button saveButton) {
+        ArrayList<AppEntry> candidates = new ArrayList<>();
+        PackageManager pm = getPackageManager();
+
+        for (AppEntry entry : installedApps) {
+            if (entry == null
+                    || getPackageName().equals(entry.packageName)
+                    || !entry.enabled
+                    || !entry.launcherShown
+                    || entry.launcherComponents.isEmpty()) {
+                continue;
+            }
+            try {
+                ApplicationInfo ai = pm.getApplicationInfo(
+                        entry.packageName, PackageManager.MATCH_DISABLED_COMPONENTS);
+                boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                        || (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+                if (!system) candidates.add(entry);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            toast("No enabled user app with a launcher icon is available for the full test.");
+            return;
+        }
+
+        String[] labels = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            AppEntry e = candidates.get(i);
+            labels[i] = e.label + "\n" + e.packageName;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Choose a test app")
+                .setMessage("The selected app will briefly have its icon hidden, then shown, then the app disabled and re-enabled. It is restored at the end.")
+                .setItems(labels, (d, which) -> {
+                    AppEntry target = candidates.get(which);
+                    safeButton.setEnabled(false);
+                    fullButton.setEnabled(false);
+                    saveButton.setEnabled(false);
+                    latestTestReport = "";
+                    testResult.setText("⏳ Full toggle test: " + target.label + "…");
+                    adbExecutor.submit(() ->
+                            runFullToggleTest(target, testResult,
+                                    safeButton, fullButton, saveButton));
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void runFullToggleTest(AppEntry target,
+                                   TextView testResult,
+                                   Button safeButton,
+                                   Button fullButton,
+                                   Button saveButton) {
+        ArrayList<String> lines = new ArrayList<>();
+        int passed = 0;
+        int failed = 0;
+        boolean packageWasDisabled = false;
+        boolean componentsWereDisabled = false;
+
+        lines.add("Test app: " + target.label);
+        lines.add("Package: " + target.packageName);
+        publishTestResult(testResult, lines, passed, failed, true);
+
+        AdbConnectionManager manager = null;
+        try {
+            manager = requireConnection();
+            if (manager == null) throw new IllegalStateException("Not connected");
+            lines.add("✅ Wireless ADB: PASS");
+            passed++;
+        } catch (Throwable e) {
+            lines.add("❌ Wireless ADB: FAIL — " + shortError(e));
+            failed++;
+        }
+        publishTestResult(testResult, lines, passed, failed, true);
+
+        if (manager != null) {
+            try {
+                for (String activityName : target.launcherComponents) {
+                    applyComponentState(manager,
+                            new ComponentName(target.packageName, activityName), false);
+                }
+                componentsWereDisabled = true;
+                lines.add("✅ Icon OFF: PASS");
+                passed++;
+            } catch (Throwable e) {
+                lines.add("❌ Icon OFF: FAIL — " + shortError(e));
                 failed++;
             }
             publishTestResult(testResult, lines, passed, failed, true);
 
             try {
-                applyComponentState(manager, target, true);
-                componentOnPassed = true;
-                if (componentOnPassed) {
-                    lines.add("✅ ON command: PASS");
-                    passed++;
-                } else {
-                    lines.add("❌ ON command: FAIL");
+                for (String activityName : target.launcherComponents) {
+                    applyComponentState(manager,
+                            new ComponentName(target.packageName, activityName), true);
+                }
+                componentsWereDisabled = false;
+                lines.add("✅ Icon ON: PASS");
+                passed++;
+            } catch (Throwable e) {
+                lines.add("❌ Icon ON: FAIL — " + shortError(e));
+                failed++;
+            }
+            publishTestResult(testResult, lines, passed, failed, true);
+
+            try {
+                applyPackageState(manager, target.packageName, false);
+                packageWasDisabled = true;
+                lines.add("✅ App OFF: PASS");
+                passed++;
+            } catch (Throwable e) {
+                lines.add("❌ App OFF: FAIL — " + shortError(e));
+                failed++;
+            }
+            publishTestResult(testResult, lines, passed, failed, true);
+
+            try {
+                applyPackageState(manager, target.packageName, true);
+                packageWasDisabled = false;
+                lines.add("✅ App ON: PASS");
+                passed++;
+            } catch (Throwable e) {
+                lines.add("❌ App ON: FAIL — " + shortError(e));
+                failed++;
+            }
+
+            boolean restoreOk = true;
+            if (packageWasDisabled) {
+                try {
+                    applyPackageState(manager, target.packageName, true);
+                    packageWasDisabled = false;
+                } catch (Throwable e) {
+                    restoreOk = false;
+                    lines.add("❌ Restore app: FAIL — " + shortError(e));
                     failed++;
                 }
-            } catch (Throwable e) {
-                lines.add("❌ ON command: FAIL — " + shortError(e));
-                failed++;
             }
-
-            // Always make a final best-effort restore to ON so the test component
-            // is left in its normal harmless state.
-            try {
-                applyComponentState(manager, target, true);
-                lines.add("✅ Test component restore: PASS");
+            if (componentsWereDisabled) {
+                try {
+                    for (String activityName : target.launcherComponents) {
+                        applyComponentState(manager,
+                                new ComponentName(target.packageName, activityName), true);
+                    }
+                    componentsWereDisabled = false;
+                } catch (Throwable e) {
+                    restoreOk = false;
+                    lines.add("❌ Restore icon: FAIL — " + shortError(e));
+                    failed++;
+                }
+            }
+            if (restoreOk) {
+                lines.add("✅ Final restore: PASS");
                 passed++;
-            } catch (Throwable e) {
-                lines.add("❌ Test component restore: FAIL — " + shortError(e));
-                failed++;
             }
-        } else {
-            lines.add("⏭ OFF/ON command test: SKIPPED (ADB not connected)");
         }
 
-        // 4) Package-level enable path is safe to test on this already-enabled app.
-        if (manager != null && manager.isConnected()) {
-            try {
-                applyPackageState(manager, getPackageName(), true);
-                lines.add("✅ App-enable command path: PASS");
-                passed++;
-            } catch (Throwable e) {
-                lines.add("❌ App-enable command path: FAIL — " + shortError(e));
-                failed++;
-            }
-        } else {
-            lines.add("⏭ App-enable command path: SKIPPED");
-        }
-
-        lines.add("ℹ Full app-disable is not auto-tested because disabling this app would close Test mode.");
-
-        boolean allCorePassed = failed == 0 && componentOffPassed && componentOnPassed;
-        lines.add(allCorePassed
-                ? "✅ RESULT: Core toggle system is working."
-                : "❌ RESULT: One or more checks failed.");
+        lines.add(failed == 0
+                ? "✅ RESULT: Full Icon/App toggle test passed."
+                : "❌ RESULT: One or more full toggle checks failed.");
 
         publishTestResult(testResult, lines, passed, failed, false);
+
         runOnUiThread(() -> {
-            runButton.setEnabled(true);
+            target.enabled = true;
+            target.launcherShown = true;
+            target.busyEnabled = false;
+            target.busyVisibility = false;
+            updateVisibleRow(target);
+            safeButton.setEnabled(true);
+            fullButton.setEnabled(true);
             saveButton.setEnabled(!latestTestReport.isEmpty());
         });
     }
@@ -841,6 +981,12 @@ public class MainActivity extends Activity {
     private String runPmStateCommand(AdbConnectionManager manager,
                                      String command,
                                      long timeoutMs) throws Exception {
+        return runAdbCommandWithMarker(manager, command, timeoutMs);
+    }
+
+    private String runAdbCommandWithMarker(AdbConnectionManager manager,
+                                           String command,
+                                           long timeoutMs) throws Exception {
         final String marker = "__AHT_DONE__";
         final AdbStream stream = manager.openStream(
                 "shell:" + command + "; echo " + marker);
@@ -863,7 +1009,7 @@ public class MainActivity extends Activity {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            throw new IllegalStateException("ADB state command timed out");
+            throw new IllegalStateException("ADB command timed out");
         } finally {
             try { stream.close(); } catch (Throwable ignored) { }
         }
