@@ -104,6 +104,8 @@ public class MainActivity extends Activity {
                 14));
 
         status = text("Not connected", 15);
+        status.setSingleLine(true);
+        status.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(status);
 
         Button openWireless = button("Open Developer options / Wireless debugging");
@@ -169,14 +171,9 @@ public class MainActivity extends Activity {
         searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
         header.addView(searchRow);
 
-        TextView resultLabel = text("Last action", 14);
-        resultLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        header.addView(resultLabel);
-
         result = text("", 12);
         result.setTypeface(Typeface.MONOSPACE);
         result.setTextIsSelectable(true);
-        header.addView(result);
 
         appList = new ListView(this);
         appList.setVerticalScrollBarEnabled(true);
@@ -212,6 +209,14 @@ public class MainActivity extends Activity {
 
         setContentView(appList);
         appList.requestApplyInsets();
+    }
+
+    private void refreshRowsWithoutJump() {
+        int first = appList.getFirstVisiblePosition();
+        View firstView = appList.getChildAt(0);
+        int top = firstView == null ? 0 : firstView.getTop();
+        appAdapter.notifyDataSetChanged();
+        appList.post(() -> appList.setSelectionFromTop(first, top));
     }
 
     private void loadInstalledApps() {
@@ -466,7 +471,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 entry.launcherShown = show;
                 result.setText(finalOutput);
-                appAdapter.notifyDataSetChanged();
+                refreshRowsWithoutJump();
             });
             setStatus((show ? "Shown: " : "Hidden: ") + entry.packageName);
         } catch (Throwable e) {
@@ -494,7 +499,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 entry.enabled = enable;
                 result.setText(finalOutput);
-                appAdapter.notifyDataSetChanged();
+                refreshRowsWithoutJump();
             });
             setStatus((enable ? "Enabled: " : "Disabled: ") + pkg);
         } catch (Throwable e) {
