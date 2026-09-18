@@ -255,14 +255,16 @@ public class MainActivity extends Activity {
         logView = text("", 11);
         logView.setTypeface(Typeface.MONOSPACE);
         logView.setTextIsSelectable(true);
-        ScrollView logScroll = new ScrollView(this);
-        logScroll.setFillViewport(true);
-        logScroll.setVerticalScrollBarEnabled(true);
-        logScroll.setScrollbarFadingEnabled(false);
-        logScroll.setNestedScrollingEnabled(true);
-        logScroll.addView(logView);
-        root.addView(logScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(360)));
+
+        // Use one full-page scroll instead of a smaller nested log scroller.
+        // This makes the log section expand with its content, so in split-screen
+        // you can scroll the whole app continuously from the controls through
+        // the complete preview without getting trapped inside a short log box.
+        int viewportHeight = getWindowManager().getCurrentWindowMetrics().getBounds().height();
+        logView.setMinHeight(Math.max(dp(220), viewportHeight));
+        root.addView(logView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         ScrollView pageScroll = new ScrollView(this);
         pageScroll.setFillViewport(true);
