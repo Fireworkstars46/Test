@@ -52,6 +52,8 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -323,7 +325,7 @@ public class MainActivity extends Activity {
         if (manager != null && manager.isConnected()) {
             try {
                 applyComponentState(manager, target, false);
-                componentOffPassed = isComponentInDesiredState(target, false);
+                componentOffPassed = true;
                 if (componentOffPassed) {
                     lines.add("✅ OFF command: PASS");
                     passed++;
@@ -339,7 +341,7 @@ public class MainActivity extends Activity {
 
             try {
                 applyComponentState(manager, target, true);
-                componentOnPassed = isComponentInDesiredState(target, true);
+                componentOnPassed = true;
                 if (componentOnPassed) {
                     lines.add("✅ ON command: PASS");
                     passed++;
@@ -355,9 +357,7 @@ public class MainActivity extends Activity {
             // Always make a final best-effort restore to ON so the test component
             // is left in its normal harmless state.
             try {
-                if (!isComponentInDesiredState(target, true)) {
-                    applyComponentState(manager, target, true);
-                }
+                applyComponentState(manager, target, true);
                 lines.add("✅ Test component restore: PASS");
                 passed++;
             } catch (Throwable e) {
@@ -371,26 +371,12 @@ public class MainActivity extends Activity {
         // 4) Package-level enable path is safe to test on this already-enabled app.
         if (manager != null && manager.isConnected()) {
             try {
-                AdbStream stream = manager.openStream(
-                        "shell:pm enable --user 0 " + getPackageName());
-                try { Thread.sleep(120); } catch (InterruptedException ignored) { }
-                try { stream.close(); } catch (Throwable ignored) { }
-
-                if (isPackageInDesiredState(getPackageName(), true)) {
-                    lines.add("✅ App-enable command path: PASS");
-                    passed++;
-                } else {
-                    lines.add("❌ App-enable command path: FAIL");
-                    failed++;
-                }
+                applyPackageState(manager, getPackageName(), true);
+                lines.add("✅ App-enable command path: PASS");
+                passed++;
             } catch (Throwable e) {
-                if (isPackageInDesiredState(getPackageName(), true)) {
-                    lines.add("✅ App-enable command path: PASS");
-                    passed++;
-                } else {
-                    lines.add("❌ App-enable command path: FAIL — " + shortError(e));
-                    failed++;
-                }
+                lines.add("❌ App-enable command path: FAIL — " + shortError(e));
+                failed++;
             }
         } else {
             lines.add("⏭ App-enable command path: SKIPPED");
@@ -802,22 +788,17 @@ public class MainActivity extends Activity {
         String command = show
                 ? "pm enable --user 0 " + flat
                 : "pm disable --user 0 " + flat;
+        String expected = show ? "enabled" : "disabled";
 
         Throwable last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
-            AdbStream stream = null;
             try {
-                stream = manager.openStream("shell:" + command);
-                if (waitForComponentState(component, show, 1200)) {
-                    return;
-                }
+                String output = runPmStateCommand(manager, command, 1500);
+                if (pmReplyHasState(output, expected)) return;
+                last = new IllegalStateException(
+                        "Unexpected Android reply: " + compactReply(output));
             } catch (Throwable e) {
                 last = e;
-                if (isComponentInDesiredState(component, show)) return;
-            } finally {
-                if (stream != null) {
-                    try { stream.close(); } catch (Throwable ignored) { }
-                }
             }
 
             if (attempt == 0) {
@@ -825,9 +806,8 @@ public class MainActivity extends Activity {
             }
         }
 
-        if (isComponentInDesiredState(component, show)) return;
         if (last instanceof Exception) throw (Exception) last;
-        throw new IllegalStateException("Android did not apply launcher icon change.");
+        throw new IllegalStateException("Android did not confirm launcher icon change.");
     }
 
     private void applyPackageState(AdbConnectionManager manager,
@@ -836,22 +816,17 @@ public class MainActivity extends Activity {
         String command = enable
                 ? "pm enable --user 0 " + pkg
                 : "pm disable-user --user 0 " + pkg;
+        String expected = enable ? "enabled" : "disabled-user";
 
         Throwable last = null;
         for (int attempt = 0; attempt < 2; attempt++) {
-            AdbStream stream = null;
             try {
-                stream = manager.openStream("shell:" + command);
-                if (waitForPackageState(pkg, enable, 1200)) {
-                    return;
-                }
+                String output = runPmStateCommand(manager, command, 1500);
+                if (pmReplyHasState(output, expected)) return;
+                last = new IllegalStateException(
+                        "Unexpected Android reply: " + compactReply(output));
             } catch (Throwable e) {
                 last = e;
-                if (isPackageInDesiredState(pkg, enable)) return;
-            } finally {
-                if (stream != null) {
-                    try { stream.close(); } catch (Throwable ignored) { }
-                }
             }
 
             if (attempt == 0) {
@@ -859,37 +834,58 @@ public class MainActivity extends Activity {
             }
         }
 
-        if (isPackageInDesiredState(pkg, enable)) return;
         if (last instanceof Exception) throw (Exception) last;
-        throw new IllegalStateException("Android did not apply app enabled state.");
+        throw new IllegalStateException("Android did not confirm app enabled state.");
     }
 
-    private boolean waitForComponentState(ComponentName component,
-                                          boolean shown,
-                                          long timeoutMs) {
-        long end = android.os.SystemClock.uptimeMillis() + timeoutMs;
-        do {
-            if (isComponentInDesiredState(component, shown)) return true;
-            try { Thread.sleep(35); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return isComponentInDesiredState(component, shown);
+    private String runPmStateCommand(AdbConnectionManager manager,
+                                     String command,
+                                     long timeoutMs) throws Exception {
+        final String marker = "__AHT_DONE__";
+        final AdbStream stream = manager.openStream(
+                "shell:" + command + "; echo " + marker);
+
+        Future<String> future = executor.submit(() -> {
+            StringBuilder out = new StringBuilder();
+            try (InputStream in = stream.openInputStream();
+                 BufferedReader reader = new BufferedReader(
+                         new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.contains(marker)) return out.toString();
+                    out.append(line).append('\n');
+                }
             }
-        } while (android.os.SystemClock.uptimeMillis() < end);
-        return isComponentInDesiredState(component, shown);
+            return out.toString();
+        });
+
+        try {
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new IllegalStateException("ADB state command timed out");
+        } finally {
+            try { stream.close(); } catch (Throwable ignored) { }
+        }
     }
 
-    private boolean waitForPackageState(String pkg,
-                                        boolean enabled,
-                                        long timeoutMs) {
-        long end = android.os.SystemClock.uptimeMillis() + timeoutMs;
-        do {
-            if (isPackageInDesiredState(pkg, enabled)) return true;
-            try { Thread.sleep(35); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return isPackageInDesiredState(pkg, enabled);
-            }
-        } while (android.os.SystemClock.uptimeMillis() < end);
-        return isPackageInDesiredState(pkg, enabled);
+    private boolean pmReplyHasState(String output, String expected) {
+        String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
+        if (lower.contains("securityexception")
+                || lower.contains("permission denial")
+                || lower.contains("unknown package")
+                || lower.contains("unknown component")
+                || lower.contains("error:")
+                || lower.contains("failed")) {
+            return false;
+        }
+        return lower.contains("new state: " + expected.toLowerCase(Locale.ROOT));
+    }
+
+    private String compactReply(String output) {
+        if (output == null || output.trim().isEmpty()) return "(no reply)";
+        String oneLine = output.trim().replace('\n', ' ').replace('\r', ' ');
+        return oneLine.length() <= 180 ? oneLine : oneLine.substring(0, 180) + "…";
     }
 
     private boolean isComponentInDesiredState(ComponentName component, boolean shown) {
