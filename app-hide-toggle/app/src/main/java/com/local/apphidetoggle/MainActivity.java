@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
         searchInput.setSingleLine(true);
         searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(58), 1));
 
-        Button rescan = button("Rescan");
+        Button rescan = button("Full scan");
         searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
         header.addView(searchRow);
 
@@ -367,8 +367,6 @@ public class MainActivity extends Activity {
         for (AppEntry entry : installedApps) {
             if (entry == null
                     || getPackageName().equals(entry.packageName)
-                    || !entry.enabled
-                    || !entry.launcherShown
                     || entry.launcherComponents.isEmpty()) {
                 continue;
             }
@@ -421,6 +419,8 @@ public class MainActivity extends Activity {
         int failed = 0;
         boolean packageWasDisabled = false;
         boolean componentsWereDisabled = false;
+        final boolean originalEnabled = target.enabled;
+        final boolean originalLauncherShown = target.launcherShown;
 
         lines.add("Test app: " + target.label);
         lines.add("Package: " + target.packageName);
@@ -489,28 +489,25 @@ public class MainActivity extends Activity {
             }
 
             boolean restoreOk = true;
-            if (packageWasDisabled) {
-                try {
-                    applyPackageState(manager, target.packageName, true);
-                    packageWasDisabled = false;
-                } catch (Throwable e) {
-                    restoreOk = false;
-                    lines.add("❌ Restore app: FAIL — " + shortError(e));
-                    failed++;
-                }
+            try {
+                applyPackageState(manager, target.packageName, originalEnabled);
+                packageWasDisabled = !originalEnabled;
+            } catch (Throwable e) {
+                restoreOk = false;
+                lines.add("❌ Restore app: FAIL — " + shortError(e));
+                failed++;
             }
-            if (componentsWereDisabled) {
-                try {
-                    for (String activityName : target.launcherComponents) {
-                        applyComponentState(manager,
-                                new ComponentName(target.packageName, activityName), true);
-                    }
-                    componentsWereDisabled = false;
-                } catch (Throwable e) {
-                    restoreOk = false;
-                    lines.add("❌ Restore icon: FAIL — " + shortError(e));
-                    failed++;
+            try {
+                for (String activityName : target.launcherComponents) {
+                    applyComponentState(manager,
+                            new ComponentName(target.packageName, activityName),
+                            originalLauncherShown);
                 }
+                componentsWereDisabled = !originalLauncherShown;
+            } catch (Throwable e) {
+                restoreOk = false;
+                lines.add("❌ Restore icon: FAIL — " + shortError(e));
+                failed++;
             }
             if (restoreOk) {
                 lines.add("✅ Final restore: PASS");
@@ -525,8 +522,8 @@ public class MainActivity extends Activity {
         publishTestResult(testResult, lines, passed, failed, false);
 
         runOnUiThread(() -> {
-            target.enabled = true;
-            target.launcherShown = true;
+            target.enabled = originalEnabled;
+            target.launcherShown = originalLauncherShown;
             target.busyEnabled = false;
             target.busyVisibility = false;
             updateVisibleRow(target);
@@ -626,8 +623,11 @@ public class MainActivity extends Activity {
                 Map<String, ArrayList<String>> launcherComponents = new HashMap<>();
                 Intent launcherQuery = new Intent(Intent.ACTION_MAIN);
                 launcherQuery.addCategory(Intent.CATEGORY_LAUNCHER);
+                int launcherFlags = PackageManager.MATCH_DISABLED_COMPONENTS
+                        | PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS
+                        | PackageManager.MATCH_ALL;
                 List<ResolveInfo> launchers = pm.queryIntentActivities(
-                        launcherQuery, PackageManager.MATCH_DISABLED_COMPONENTS);
+                        launcherQuery, launcherFlags);
                 for (ResolveInfo ri : launchers) {
                     if (ri.activityInfo == null || ri.activityInfo.packageName == null
                             || ri.activityInfo.name == null) continue;
@@ -664,6 +664,21 @@ public class MainActivity extends Activity {
 
                     ArrayList<String> components = launcherComponents.get(ai.packageName);
                     if (components == null) components = new ArrayList<>();
+                    else components = new ArrayList<>(components);
+
+                    // Samsung can occasionally omit an otherwise launchable activity from
+                    // the bulk resolver query. Add the package's concrete launch component
+                    // as a fallback so the Icon switch/full test still has a target.
+                    try {
+                        Intent launchIntent = pm.getLaunchIntentForPackage(ai.packageName);
+                        if (launchIntent != null && launchIntent.getComponent() != null) {
+                            String activity = launchIntent.getComponent().getClassName();
+                            if (activity != null && !components.contains(activity)) {
+                                components.add(activity);
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    }
 
                     boolean launcherShown = false;
                     for (String activityName : components) {
@@ -925,18 +940,30 @@ public class MainActivity extends Activity {
                                      ComponentName component,
                                      boolean show) throws Exception {
         String flat = component.getPackageName() + "/" + component.getClassName();
-        String command = show
-                ? "pm enable --user 0 " + flat
-                : "pm disable --user 0 " + flat;
-        String expected = show ? "enabled" : "disabled";
-
         Throwable last = null;
+
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
-                String output = runPmStateCommand(manager, command, 1500);
-                if (pmReplyHasState(output, expected)) return;
-                last = new IllegalStateException(
-                        "Unexpected Android reply: " + compactReply(output));
+                if (show) {
+                    String output = runPmStateCommand(
+                            manager, "pm enable --user 0 " + flat, 1800);
+                    if (pmReplyHasAnyState(output, "enabled")) return;
+                    last = new IllegalStateException(
+                            "Unexpected Android reply: " + compactReply(output));
+                } else {
+                    String output = runPmStateCommand(
+                            manager, "pm disable --user 0 " + flat, 1800);
+                    if (pmReplyHasAnyState(output, "disabled", "disabled-user")) return;
+
+                    // Samsung builds can reject COMPONENT_ENABLED_STATE_DISABLED for
+                    // particular activities but accept the per-user disabled state.
+                    String fallback = runPmStateCommand(
+                            manager, "pm disable-user --user 0 " + flat, 1800);
+                    if (pmReplyHasAnyState(fallback, "disabled-user", "disabled")) return;
+
+                    last = new IllegalStateException(
+                            "Unexpected Android reply: " + compactReply(fallback));
+                }
             } catch (Throwable e) {
                 last = e;
             }
@@ -1016,16 +1043,22 @@ public class MainActivity extends Activity {
     }
 
     private boolean pmReplyHasState(String output, String expected) {
+        return pmReplyHasAnyState(output, expected);
+    }
+
+    private boolean pmReplyHasAnyState(String output, String... expectedStates) {
         String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
-        if (lower.contains("securityexception")
-                || lower.contains("permission denial")
-                || lower.contains("unknown package")
-                || lower.contains("unknown component")
-                || lower.contains("error:")
-                || lower.contains("failed")) {
-            return false;
+
+        // The PackageManager confirmation is authoritative. Some Samsung builds
+        // can include extra diagnostic text around a command that still applied.
+        for (String expected : expectedStates) {
+            if (expected != null
+                    && lower.contains("new state: " + expected.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
         }
-        return lower.contains("new state: " + expected.toLowerCase(Locale.ROOT));
+
+        return false;
     }
 
     private String compactReply(String output) {
