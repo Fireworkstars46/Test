@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 27
-        versionName '2.5.2-icon-fullscan-fix'
+        versionCode 28
+        versionName '2.5.3-icon-confirm-cache'
     }
 
     packaging {
