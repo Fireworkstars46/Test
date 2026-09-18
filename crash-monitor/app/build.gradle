@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.crashmonitor'
         minSdk 31
         targetSdk 35
-        versionCode 8
-        versionName '1.7-full-page-log'
+        versionCode 9
+        versionName '1.8-stable-scroll'
     }
 
     signingConfigs {
