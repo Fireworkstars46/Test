@@ -20,7 +20,6 @@ import android.view.WindowInsets;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -60,12 +59,8 @@ public class MainActivity extends Activity {
     private EditText codeInput;
     private EditText searchInput;
     private TextView appCount;
-    private TextView selectedApp;
     private ListView appList;
     private AppAdapter appAdapter;
-    private Button visibilityToggleButton;
-    private Button enabledToggleButton;
-    private String selectedPackage = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,14 +90,6 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private ImageButton indicatorButton() {
-        ImageButton b = new ImageButton(this);
-        b.setPadding(dp(7), dp(7), dp(7), dp(7));
-        b.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        b.setBackgroundResource(android.R.drawable.list_selector_background);
-        return b;
-    }
-
     private void buildUi() {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -113,7 +100,7 @@ public class MainActivity extends Activity {
         header.addView(title);
 
         header.addView(text(
-                "Tap an app row to select it, or tap either status icon on the left to toggle it immediately. The eye controls the launcher icon; the check/X controls whether the whole app is enabled.",
+                "Each app has its own Hide/Show and Disable/Enable buttons directly in the app row, so you never have to scroll to controls at the bottom.",
                 14));
 
         status = text("Not connected", 15);
@@ -164,7 +151,7 @@ public class MainActivity extends Activity {
         header.addView(appsLabel);
 
         header.addView(text(
-                "Eye = shown/hidden launcher icon   •   ✓ = enabled   •   ✕ = disabled\nTap the eye or ✓/✕ itself to toggle that setting.",
+                "Eye = launcher icon shown/hidden   •   ✓ = enabled   •   ✕ = disabled",
                 12));
 
         appCount = text("Scanning installed apps…", 13);
@@ -182,41 +169,14 @@ public class MainActivity extends Activity {
         searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
         header.addView(searchRow);
 
-        LinearLayout footer = new LinearLayout(this);
-        footer.setOrientation(LinearLayout.VERTICAL);
-        footer.setPadding(dp(16), dp(10), dp(16), dp(18));
-
-        selectedApp = text("No app selected", 14);
-        selectedApp.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        selectedApp.setTextIsSelectable(true);
-        footer.addView(selectedApp);
-
-        footer.addView(text(
-                "Warning: hiding or disabling Settings, One UI Home, System UI, or other core apps can make the phone difficult to use. This app refuses to hide or disable itself.",
-                13));
-
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        visibilityToggleButton = button("Hide / Show");
-        enabledToggleButton = button("Disable / Enable");
-        actionRow.addView(visibilityToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
-        actionRow.addView(enabledToggleButton, new LinearLayout.LayoutParams(0, dp(60), 1));
-        footer.addView(actionRow);
-
-        visibilityToggleButton.setEnabled(false);
-        enabledToggleButton.setEnabled(false);
-        visibilityToggleButton.setOnClickListener(v -> toggleSelectedVisibility());
-        enabledToggleButton.setOnClickListener(v -> toggleSelectedEnabled());
-
-        TextView resultLabel = text("Result", 16);
+        TextView resultLabel = text("Last action", 14);
         resultLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        footer.addView(resultLabel);
+        header.addView(resultLabel);
 
-        result = text("", 13);
+        result = text("", 12);
         result.setTypeface(Typeface.MONOSPACE);
         result.setTextIsSelectable(true);
-        result.setMinHeight(dp(90));
-        footer.addView(result);
+        header.addView(result);
 
         appList = new ListView(this);
         appList.setVerticalScrollBarEnabled(true);
@@ -227,19 +187,11 @@ public class MainActivity extends Activity {
         appList.setFastScrollEnabled(true);
         appList.setClipToPadding(true);
         appList.addHeaderView(header, null, false);
-        appList.addFooterView(footer, null, false);
 
         appAdapter = new AppAdapter();
         appList.setAdapter(appAdapter);
 
-        appList.setOnItemClickListener((parent, view, position, id) -> {
-            Object item = parent.getItemAtPosition(position);
-            if (!(item instanceof AppEntry)) return;
-            AppEntry entry = (AppEntry) item;
-            selectedPackage = entry.packageName;
-            updateSelectedAppText();
-            appAdapter.notifyDataSetChanged();
-        });
+
 
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
@@ -352,48 +304,11 @@ public class MainActivity extends Activity {
                     String q = searchInput.getText().toString();
                     appAdapter.filter(q);
                     appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
-                    updateSelectedAppText();
                 });
             } catch (Throwable e) {
                 runOnUiThread(() -> appCount.setText("Could not scan apps: " + shortError(e)));
             }
         });
-    }
-
-    private void updateSelectedAppText() {
-        if (selectedPackage.isEmpty()) {
-            selectedApp.setText("No app selected");
-            visibilityToggleButton.setEnabled(false);
-            visibilityToggleButton.setText("Hide / Show");
-            enabledToggleButton.setEnabled(false);
-            enabledToggleButton.setText("Disable / Enable");
-            return;
-        }
-
-        for (AppEntry entry : installedApps) {
-            if (entry.packageName.equals(selectedPackage)) {
-                String iconState = entry.launcherComponents.isEmpty()
-                        ? "No launcher icon"
-                        : (entry.launcherShown ? "Shown" : "Hidden");
-                String appState = entry.enabled ? "Enabled" : "Disabled";
-                selectedApp.setText("Selected: " + entry.label
-                        + "\nIcon: " + iconState + "   •   App: " + appState
-                        + "\n" + entry.packageName);
-
-                visibilityToggleButton.setEnabled(!entry.launcherComponents.isEmpty());
-                visibilityToggleButton.setText(entry.launcherShown ? "Hide app" : "Show app");
-                enabledToggleButton.setEnabled(true);
-                enabledToggleButton.setText(entry.enabled ? "Disable app" : "Enable app");
-                return;
-            }
-        }
-
-        selectedPackage = "";
-        selectedApp.setText("No app selected");
-        visibilityToggleButton.setEnabled(false);
-        visibilityToggleButton.setText("Hide / Show");
-        enabledToggleButton.setEnabled(false);
-        enabledToggleButton.setText("Disable / Enable");
     }
 
     private void findPairingPort() {
@@ -482,19 +397,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private AppEntry findSelectedEntry() {
-        for (AppEntry entry : installedApps) {
-            if (entry.packageName.equals(selectedPackage)) return entry;
-        }
-        return null;
-    }
-
-    private void toggleSelectedVisibility() {
-        AppEntry entry = findSelectedEntry();
-        if (entry == null) {
-            toast("Tap an app in the installed-app list first.");
-            return;
-        }
+    private void toggleVisibility(AppEntry entry) {
+        if (entry == null) return;
         if (entry.launcherComponents.isEmpty()) {
             toast("This app has no launcher icon to hide or show.");
             return;
@@ -510,12 +414,8 @@ public class MainActivity extends Activity {
         executor.submit(() -> executeVisibilityToggle(entry, show));
     }
 
-    private void toggleSelectedEnabled() {
-        AppEntry entry = findSelectedEntry();
-        if (entry == null) {
-            toast("Tap an app in the installed-app list first.");
-            return;
-        }
+    private void toggleEnabled(AppEntry entry) {
+        if (entry == null) return;
         if (getPackageName().equals(entry.packageName) && entry.enabled) {
             toast("App Hide Toggle will not disable itself.");
             return;
@@ -524,7 +424,7 @@ public class MainActivity extends Activity {
         boolean enable = !entry.enabled;
         result.setText("");
         setStatus((enable ? "Enabling " : "Disabling ") + entry.packageName + "…");
-        executor.submit(() -> executeEnabledToggle(entry.packageName, enable));
+        executor.submit(() -> executeEnabledToggle(entry, enable));
     }
 
     private AdbConnectionManager requireConnection() throws Exception {
@@ -563,9 +463,12 @@ public class MainActivity extends Activity {
                 output.append(show ? "Launcher icon shown." : "Launcher icon hidden.");
             }
             final String finalOutput = output.toString();
-            runOnUiThread(() -> result.setText(finalOutput));
+            runOnUiThread(() -> {
+                entry.launcherShown = show;
+                result.setText(finalOutput);
+                appAdapter.notifyDataSetChanged();
+            });
             setStatus((show ? "Shown: " : "Hidden: ") + entry.packageName);
-            loadInstalledApps();
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> result.setText(msg));
@@ -573,11 +476,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void executeEnabledToggle(String pkg, boolean enable) {
+    private void executeEnabledToggle(AppEntry entry, boolean enable) {
         try {
             AdbConnectionManager manager = requireConnection();
             if (manager == null) return;
 
+            String pkg = entry.packageName;
             String command = enable
                     ? "shell:pm enable --user 0 " + pkg
                     : "shell:pm disable-user --user 0 " + pkg;
@@ -587,9 +491,12 @@ public class MainActivity extends Activity {
             }
 
             final String finalOutput = output;
-            runOnUiThread(() -> result.setText(finalOutput));
+            runOnUiThread(() -> {
+                entry.enabled = enable;
+                result.setText(finalOutput);
+                appAdapter.notifyDataSetChanged();
+            });
             setStatus((enable ? "Enabled: " : "Disabled: ") + pkg);
-            loadInstalledApps();
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> result.setText(msg));
@@ -636,8 +543,8 @@ public class MainActivity extends Activity {
     private static class AppEntry {
         final String label;
         final String packageName;
-        final boolean enabled;
-        final boolean launcherShown;
+        boolean enabled;
+        boolean launcherShown;
         final ArrayList<String> launcherComponents;
         final Drawable icon;
 
@@ -653,19 +560,23 @@ public class MainActivity extends Activity {
     }
 
     private static class RowHolder {
-        final ImageButton visibility;
-        final ImageButton enabled;
+        final ImageView visibilityIndicator;
+        final ImageView enabledIndicator;
         final ImageView appIcon;
         final TextView name;
         final TextView pkg;
+        final Button visibilityButton;
+        final Button enabledButton;
 
-        RowHolder(ImageButton visibility, ImageButton enabled, ImageView appIcon,
-                  TextView name, TextView pkg) {
-            this.visibility = visibility;
-            this.enabled = enabled;
+        RowHolder(ImageView visibilityIndicator, ImageView enabledIndicator, ImageView appIcon,
+                  TextView name, TextView pkg, Button visibilityButton, Button enabledButton) {
+            this.visibilityIndicator = visibilityIndicator;
+            this.enabledIndicator = enabledIndicator;
             this.appIcon = appIcon;
             this.name = name;
             this.pkg = pkg;
+            this.visibilityButton = visibilityButton;
+            this.enabledButton = enabledButton;
         }
     }
 
@@ -712,38 +623,72 @@ public class MainActivity extends Activity {
                 LinearLayout row = new LinearLayout(MainActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(6), dp(6), dp(8), dp(6));
-                row.setMinimumHeight(dp(62));
-                row.setBackgroundResource(android.R.drawable.list_selector_background);
+                row.setPadding(dp(6), dp(7), dp(8), dp(7));
+                row.setMinimumHeight(dp(96));
 
-                ImageButton eye = indicatorButton();
-                row.addView(eye, new LinearLayout.LayoutParams(dp(42), dp(42)));
+                LinearLayout indicators = new LinearLayout(MainActivity.this);
+                indicators.setOrientation(LinearLayout.VERTICAL);
+                indicators.setGravity(android.view.Gravity.CENTER);
 
-                ImageButton enabled = indicatorButton();
-                LinearLayout.LayoutParams enabledParams = new LinearLayout.LayoutParams(dp(42), dp(42));
-                enabledParams.setMargins(dp(2), 0, dp(7), 0);
-                row.addView(enabled, enabledParams);
+                ImageView eye = new ImageView(MainActivity.this);
+                eye.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                indicators.addView(eye, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+                ImageView enabled = new ImageView(MainActivity.this);
+                enabled.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                indicators.addView(enabled, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+                LinearLayout.LayoutParams indicatorParams = new LinearLayout.LayoutParams(dp(34), dp(64));
+                indicatorParams.setMargins(0, 0, dp(5), 0);
+                row.addView(indicators, indicatorParams);
 
                 ImageView appIcon = new ImageView(MainActivity.this);
-                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(42), dp(42));
-                iconParams.setMargins(0, 0, dp(10), 0);
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+                iconParams.setMargins(0, 0, dp(9), 0);
                 row.addView(appIcon, iconParams);
 
-                LinearLayout texts = new LinearLayout(MainActivity.this);
-                texts.setOrientation(LinearLayout.VERTICAL);
+                LinearLayout content = new LinearLayout(MainActivity.this);
+                content.setOrientation(LinearLayout.VERTICAL);
 
                 TextView name = text("", 15);
                 name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                texts.addView(name);
+                content.addView(name);
 
-                TextView pkg = text("", 12);
+                TextView pkg = text("", 11);
                 pkg.setTextIsSelectable(false);
-                texts.addView(pkg);
+                content.addView(pkg);
 
-                row.addView(texts, new LinearLayout.LayoutParams(
+                LinearLayout buttons = new LinearLayout(MainActivity.this);
+                buttons.setOrientation(LinearLayout.HORIZONTAL);
+
+                Button visibilityButton = button("Hide");
+                visibilityButton.setMinHeight(0);
+                visibilityButton.setMinimumHeight(0);
+                visibilityButton.setPadding(dp(4), 0, dp(4), 0);
+
+                Button enabledButton = button("Disable");
+                enabledButton.setMinHeight(0);
+                enabledButton.setMinimumHeight(0);
+                enabledButton.setPadding(dp(4), 0, dp(4), 0);
+
+                LinearLayout.LayoutParams actionParams1 =
+                        new LinearLayout.LayoutParams(0, dp(40), 1);
+                actionParams1.setMargins(0, dp(2), dp(4), 0);
+                buttons.addView(visibilityButton, actionParams1);
+
+                LinearLayout.LayoutParams actionParams2 =
+                        new LinearLayout.LayoutParams(0, dp(40), 1);
+                actionParams2.setMargins(dp(4), dp(2), 0, 0);
+                buttons.addView(enabledButton, actionParams2);
+
+                content.addView(buttons, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+                row.addView(content, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-                holder = new RowHolder(eye, enabled, appIcon, name, pkg);
+                holder = new RowHolder(
+                        eye, enabled, appIcon, name, pkg, visibilityButton, enabledButton);
                 row.setTag(holder);
                 convertView = row;
             } else {
@@ -757,40 +702,28 @@ public class MainActivity extends Activity {
                     : getDrawable(android.R.drawable.sym_def_app_icon));
 
             int tint = holder.name.getCurrentTextColor();
-            holder.visibility.setImageTintList(ColorStateList.valueOf(tint));
-            holder.enabled.setImageTintList(ColorStateList.valueOf(tint));
+            holder.visibilityIndicator.setImageTintList(ColorStateList.valueOf(tint));
+            holder.enabledIndicator.setImageTintList(ColorStateList.valueOf(tint));
 
             boolean hasLauncher = !entry.launcherComponents.isEmpty();
-            holder.visibility.setImageResource(entry.launcherShown
+            holder.visibilityIndicator.setImageResource(entry.launcherShown
                     ? R.drawable.ic_visibility
                     : R.drawable.ic_visibility_off);
-            holder.visibility.setEnabled(hasLauncher);
-            holder.visibility.setAlpha(hasLauncher ? 1f : 0.28f);
-            holder.visibility.setContentDescription(entry.launcherShown
-                    ? "Hide " + entry.label + " launcher icon"
-                    : "Show " + entry.label + " launcher icon");
-            holder.visibility.setOnClickListener(v -> {
-                if (!hasLauncher) return;
-                selectedPackage = entry.packageName;
-                updateSelectedAppText();
-                toggleSelectedVisibility();
-            });
+            holder.visibilityIndicator.setAlpha(hasLauncher ? 1f : 0.28f);
 
-            holder.enabled.setImageResource(entry.enabled
+            holder.enabledIndicator.setImageResource(entry.enabled
                     ? R.drawable.ic_check
                     : R.drawable.ic_close);
-            holder.enabled.setEnabled(true);
-            holder.enabled.setAlpha(1f);
-            holder.enabled.setContentDescription(entry.enabled
-                    ? "Disable " + entry.label
-                    : "Enable " + entry.label);
-            holder.enabled.setOnClickListener(v -> {
-                selectedPackage = entry.packageName;
-                updateSelectedAppText();
-                toggleSelectedEnabled();
-            });
+            holder.enabledIndicator.setAlpha(1f);
 
-            convertView.setActivated(entry.packageName.equals(selectedPackage));
+            holder.visibilityButton.setText(entry.launcherShown ? "Hide" : "Show");
+            holder.visibilityButton.setEnabled(hasLauncher);
+            holder.visibilityButton.setOnClickListener(v -> toggleVisibility(entry));
+
+            holder.enabledButton.setText(entry.enabled ? "Disable" : "Enable");
+            holder.enabledButton.setEnabled(true);
+            holder.enabledButton.setOnClickListener(v -> toggleEnabled(entry));
+
             return convertView;
         }
     }
