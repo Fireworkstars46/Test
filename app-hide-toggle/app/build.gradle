@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 34
-        versionName '2.5.9-useful-app-filter'
+        versionCode 35
+        versionName '2.6-user-facing-system-filter'
     }
 
     packaging {
