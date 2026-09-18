@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 12
-        versionName '2.3.7-no-jump'
+        versionCode 13
+        versionName '2.3.8-fixed-list-reliable-toggle'
     }
 
     packaging {
