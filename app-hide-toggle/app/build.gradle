@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 32
-        versionName '2.5.7-direct-report-save'
+        versionCode 33
+        versionName '2.5.8-auto-test-selection-fix'
     }
 
     packaging {
