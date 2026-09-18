@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 13
-        versionName '2.3.8-fixed-list-reliable-toggle'
+        versionCode 14
+        versionName '2.3.9-stable-row-actions'
     }
 
     packaging {
