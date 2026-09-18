@@ -23,6 +23,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -101,7 +102,7 @@ public class MainActivity extends Activity {
         header.addView(title);
 
         header.addView(text(
-                "Each app has its own Hide/Show and Disable/Enable buttons directly in the app row, so you never have to scroll to controls at the bottom.",
+                "Each app has two smooth switches in its row. Icon controls whether the launcher icon is shown. App controls whether the whole app is enabled.",
                 14));
 
         status = text("Not connected", 15);
@@ -154,7 +155,7 @@ public class MainActivity extends Activity {
         header.addView(appsLabel);
 
         header.addView(text(
-                "Eye = launcher icon shown/hidden   •   ✓ = enabled   •   ✕ = disabled",
+                "Switch ON = shown/enabled   •   Switch OFF = hidden/disabled",
                 12));
 
         appCount = text("Scanning installed apps…", 13);
@@ -408,34 +409,47 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void toggleVisibility(AppEntry entry) {
-        if (entry == null || entry.busyVisibility) return;
+    private void toggleVisibility(AppEntry entry, boolean show) {
+        if (entry == null) return;
+        if (entry.busyVisibility) {
+            updateVisibleRow(entry);
+            return;
+        }
         if (entry.launcherComponents.isEmpty()) {
+            updateVisibleRow(entry);
             toast("This app has no launcher icon to hide or show.");
             return;
         }
-        if (getPackageName().equals(entry.packageName) && entry.launcherShown) {
+        if (getPackageName().equals(entry.packageName) && !show) {
+            updateVisibleRow(entry);
             toast("App Hide Toggle will not hide itself.");
             return;
         }
+        if (show == entry.launcherShown) return;
 
-        boolean show = !entry.launcherShown;
+        boolean previous = entry.launcherShown;
+        entry.launcherShown = show;
         entry.busyVisibility = true;
-        updateVisibleRow(entry);
-        adbExecutor.submit(() -> executeVisibilityToggle(entry, show));
+        adbExecutor.submit(() -> executeVisibilityToggle(entry, show, previous));
     }
 
-    private void toggleEnabled(AppEntry entry) {
-        if (entry == null || entry.busyEnabled) return;
-        if (getPackageName().equals(entry.packageName) && entry.enabled) {
+    private void toggleEnabled(AppEntry entry, boolean enable) {
+        if (entry == null) return;
+        if (entry.busyEnabled) {
+            updateVisibleRow(entry);
+            return;
+        }
+        if (getPackageName().equals(entry.packageName) && !enable) {
+            updateVisibleRow(entry);
             toast("App Hide Toggle will not disable itself.");
             return;
         }
+        if (enable == entry.enabled) return;
 
-        boolean enable = !entry.enabled;
+        boolean previous = entry.enabled;
+        entry.enabled = enable;
         entry.busyEnabled = true;
-        updateVisibleRow(entry);
-        adbExecutor.submit(() -> executeEnabledToggle(entry, enable));
+        adbExecutor.submit(() -> executeEnabledToggle(entry, enable, previous));
     }
 
     private AdbConnectionManager requireConnection() throws Exception {
@@ -455,7 +469,7 @@ public class MainActivity extends Activity {
         return manager;
     }
 
-    private void executeVisibilityToggle(AppEntry entry, boolean show) {
+    private void executeVisibilityToggle(AppEntry entry, boolean show, boolean previous) {
         try {
             AdbConnectionManager manager = requireConnection();
             if (manager == null) throw new IllegalStateException("Not connected");
@@ -476,6 +490,7 @@ public class MainActivity extends Activity {
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> {
+                entry.launcherShown = previous;
                 entry.busyVisibility = false;
                 updateVisibleRow(entry);
                 toast("Hide/Show failed: " + msg);
@@ -483,7 +498,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void executeEnabledToggle(AppEntry entry, boolean enable) {
+    private void executeEnabledToggle(AppEntry entry, boolean enable, boolean previous) {
         try {
             AdbConnectionManager manager = requireConnection();
             if (manager == null) throw new IllegalStateException("Not connected");
@@ -501,6 +516,7 @@ public class MainActivity extends Activity {
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> {
+                entry.enabled = previous;
                 entry.busyEnabled = false;
                 updateVisibleRow(entry);
                 toast("Enable/Disable failed: " + msg);
@@ -598,19 +614,19 @@ public class MainActivity extends Activity {
         final ImageView appIcon;
         final TextView name;
         final TextView pkg;
-        final Button visibilityButton;
-        final Button enabledButton;
+        final Switch visibilitySwitch;
+        final Switch enabledSwitch;
         String boundPackage = "";
 
         RowHolder(ImageView visibilityIndicator, ImageView enabledIndicator, ImageView appIcon,
-                  TextView name, TextView pkg, Button visibilityButton, Button enabledButton) {
+                  TextView name, TextView pkg, Switch visibilitySwitch, Switch enabledSwitch) {
             this.visibilityIndicator = visibilityIndicator;
             this.enabledIndicator = enabledIndicator;
             this.appIcon = appIcon;
             this.name = name;
             this.pkg = pkg;
-            this.visibilityButton = visibilityButton;
-            this.enabledButton = enabledButton;
+            this.visibilitySwitch = visibilitySwitch;
+            this.enabledSwitch = enabledSwitch;
         }
     }
 
@@ -636,17 +652,32 @@ public class MainActivity extends Activity {
                 ? R.drawable.ic_check
                 : R.drawable.ic_close);
 
-        holder.visibilityButton.setText(entry.busyVisibility
-                ? "Working…"
-                : (entry.launcherShown ? "Hide" : "Show"));
-        holder.visibilityButton.setEnabled(hasLauncher && !entry.busyVisibility);
-        holder.visibilityButton.setOnClickListener(v -> toggleVisibility(entry));
+        // Clear listeners before setChecked so recycled rows never fire commands while binding.
+        holder.visibilitySwitch.setOnCheckedChangeListener(null);
+        holder.enabledSwitch.setOnCheckedChangeListener(null);
 
-        holder.enabledButton.setText(entry.busyEnabled
-                ? "Working…"
-                : (entry.enabled ? "Disable" : "Enable"));
-        holder.enabledButton.setEnabled(!entry.busyEnabled);
-        holder.enabledButton.setOnClickListener(v -> toggleEnabled(entry));
+        holder.visibilitySwitch.setChecked(entry.launcherShown);
+        holder.enabledSwitch.setChecked(entry.enabled);
+
+        holder.visibilitySwitch.setEnabled(hasLauncher && !entry.busyVisibility);
+        holder.enabledSwitch.setEnabled(!entry.busyEnabled);
+
+        holder.visibilitySwitch.setContentDescription(
+                (entry.launcherShown ? "Hide " : "Show ") + entry.label + " launcher icon");
+        holder.enabledSwitch.setContentDescription(
+                (entry.enabled ? "Disable " : "Enable ") + entry.label);
+
+        holder.visibilitySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked == entry.launcherShown) return;
+            buttonView.setEnabled(false);
+            toggleVisibility(entry, isChecked);
+        });
+
+        holder.enabledSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked == entry.enabled) return;
+            buttonView.setEnabled(false);
+            toggleEnabled(entry, isChecked);
+        });
     }
 
     private class AppAdapter extends BaseAdapter {
@@ -727,41 +758,48 @@ public class MainActivity extends Activity {
                 pkg.setTextIsSelectable(false);
                 content.addView(pkg);
 
-                LinearLayout buttons = new LinearLayout(MainActivity.this);
-                buttons.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout switches = new LinearLayout(MainActivity.this);
+                switches.setOrientation(LinearLayout.HORIZONTAL);
+                switches.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-                Button visibilityButton = button("Hide");
-                visibilityButton.setMinHeight(0);
-                visibilityButton.setMinimumHeight(0);
-                visibilityButton.setPadding(dp(4), 0, dp(4), 0);
-                visibilityButton.setFocusable(false);
-                visibilityButton.setFocusableInTouchMode(false);
+                Switch visibilitySwitch = new Switch(MainActivity.this);
+                visibilitySwitch.setText("Icon");
+                visibilitySwitch.setTextSize(13);
+                visibilitySwitch.setShowText(false);
+                visibilitySwitch.setSwitchMinWidth(dp(46));
+                visibilitySwitch.setThumbTextPadding(0);
+                visibilitySwitch.setFocusable(false);
+                visibilitySwitch.setFocusableInTouchMode(false);
+                visibilitySwitch.setPadding(0, 0, dp(4), 0);
 
-                Button enabledButton = button("Disable");
-                enabledButton.setMinHeight(0);
-                enabledButton.setMinimumHeight(0);
-                enabledButton.setPadding(dp(4), 0, dp(4), 0);
-                enabledButton.setFocusable(false);
-                enabledButton.setFocusableInTouchMode(false);
+                Switch enabledSwitch = new Switch(MainActivity.this);
+                enabledSwitch.setText("App");
+                enabledSwitch.setTextSize(13);
+                enabledSwitch.setShowText(false);
+                enabledSwitch.setSwitchMinWidth(dp(46));
+                enabledSwitch.setThumbTextPadding(0);
+                enabledSwitch.setFocusable(false);
+                enabledSwitch.setFocusableInTouchMode(false);
+                enabledSwitch.setPadding(dp(4), 0, 0, 0);
 
-                LinearLayout.LayoutParams actionParams1 =
-                        new LinearLayout.LayoutParams(0, dp(40), 1);
-                actionParams1.setMargins(0, dp(2), dp(4), 0);
-                buttons.addView(visibilityButton, actionParams1);
+                LinearLayout.LayoutParams switchParams1 =
+                        new LinearLayout.LayoutParams(0, dp(48), 1);
+                switchParams1.setMargins(0, dp(2), dp(4), 0);
+                switches.addView(visibilitySwitch, switchParams1);
 
-                LinearLayout.LayoutParams actionParams2 =
-                        new LinearLayout.LayoutParams(0, dp(40), 1);
-                actionParams2.setMargins(dp(4), dp(2), 0, 0);
-                buttons.addView(enabledButton, actionParams2);
+                LinearLayout.LayoutParams switchParams2 =
+                        new LinearLayout.LayoutParams(0, dp(48), 1);
+                switchParams2.setMargins(dp(4), dp(2), 0, 0);
+                switches.addView(enabledSwitch, switchParams2);
 
-                content.addView(buttons, new LinearLayout.LayoutParams(
+                content.addView(switches, new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
                 row.addView(content, new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
                 holder = new RowHolder(
-                        eye, enabled, appIcon, name, pkg, visibilityButton, enabledButton);
+                        eye, enabled, appIcon, name, pkg, visibilitySwitch, enabledSwitch);
                 row.setTag(holder);
                 convertView = row;
             } else {
