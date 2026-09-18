@@ -29,7 +29,6 @@ import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -512,13 +511,13 @@ public class MainActivity extends Activity {
     private String runPackageCommandWithRetry(AdbConnectionManager manager, String command) throws Exception {
         String output;
         try {
-            output = runInteractiveShellCommand(manager, command);
+            output = runShell(manager, "shell:" + command);
         } catch (Exception first) {
             try {
                 manager.autoConnect(this, 10000);
             } catch (Throwable ignored) {
             }
-            output = runInteractiveShellCommand(manager, command);
+            output = runShell(manager, "shell:" + command);
         }
 
         String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
@@ -535,26 +534,19 @@ public class MainActivity extends Activity {
         return output == null ? "" : output;
     }
 
-    private String runInteractiveShellCommand(AdbConnectionManager manager, String command) throws Exception {
-        AdbStream stream = manager.openStream("shell:");
-        StringBuilder text = new StringBuilder();
-        try {
-            OutputStream out = stream.openOutputStream();
-            out.write((command + "\nexit\n").getBytes(StandardCharsets.UTF_8));
-            out.flush();
-
-            try (InputStream in = stream.openInputStream();
-                 BufferedReader reader = new BufferedReader(
-                         new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    text.append(line).append('\n');
-                }
+    private String runShell(AdbConnectionManager manager, String service) throws Exception {
+        AdbStream stream = manager.openStream(service);
+        StringBuilder out = new StringBuilder();
+        try (InputStream in = stream.openInputStream();
+             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                out.append(line).append('\n');
             }
         } finally {
             try { stream.close(); } catch (Exception ignored) { }
         }
-        return text.toString();
+        return out.toString();
     }
 
     private void setStatus(String s) {
