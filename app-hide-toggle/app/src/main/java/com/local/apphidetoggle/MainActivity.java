@@ -1,7 +1,6 @@
 package com.local.apphidetoggle;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -13,6 +12,7 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -29,8 +29,10 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,8 +52,12 @@ public class MainActivity extends Activity {
     private TextView result;
     private EditText portInput;
     private EditText codeInput;
+    private EditText searchInput;
     private TextView appCount;
     private TextView selectedApp;
+    private ListView appList;
+    private AppAdapter appAdapter;
+    private ScrollView pageScroll;
     private String selectedPackage = "";
 
     @Override
@@ -60,7 +66,7 @@ public class MainActivity extends Activity {
         buildUi();
         setStatus("Checking Wireless debugging connection…");
         executor.submit(this::autoConnect);
-        loadInstalledApps(false);
+        loadInstalledApps();
     }
 
     private int dp(int n) {
@@ -91,10 +97,9 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title);
 
-        TextView info = text(
-                "Pair once with Android Wireless debugging. Choose an installed app from the scanned list, then hide/disable or show/enable it for user 0. No package-name typing, Shizuku, or aShell is needed.",
-                14);
-        root.addView(info);
+        root.addView(text(
+                "Pair once with Android Wireless debugging. Installed apps are scanned automatically below. Tap an app in the list, then hide/disable or show/enable it for user 0.",
+                14));
 
         status = text("Not connected", 15);
         root.addView(status);
@@ -115,6 +120,7 @@ public class MainActivity extends Activity {
         portInput.setHint("Pair port");
         portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         pairRow.addView(portInput, new LinearLayout.LayoutParams(0, dp(58), 1));
+
         codeInput = new EditText(this);
         codeInput.setHint("6-digit code");
         codeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -138,33 +144,64 @@ public class MainActivity extends Activity {
         });
         root.addView(connect);
 
-        TextView appsLabel = text("Installed apps", 16);
+        TextView appsLabel = text("Installed apps", 17);
         appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(appsLabel);
 
         appCount = text("Scanning installed apps…", 13);
         root.addView(appCount);
 
-        LinearLayout chooserRow = new LinearLayout(this);
-        chooserRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button chooseApp = button("Choose app");
-        Button rescan = button("Rescan");
-        chooserRow.addView(chooseApp, new LinearLayout.LayoutParams(0, dp(60), 2));
-        chooserRow.addView(rescan, new LinearLayout.LayoutParams(0, dp(60), 1));
-        root.addView(chooserRow);
+        LinearLayout searchRow = new LinearLayout(this);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        chooseApp.setOnClickListener(v -> showAppChooser());
-        rescan.setOnClickListener(v -> loadInstalledApps(false));
+        searchInput = new EditText(this);
+        searchInput.setHint("Search app name or package");
+        searchInput.setSingleLine(true);
+        searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(58), 1));
+
+        Button rescan = button("Rescan");
+        searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
+        root.addView(searchRow);
+
+        appList = new ListView(this);
+        appList.setNestedScrollingEnabled(true);
+        appList.setVerticalScrollBarEnabled(true);
+        appList.setScrollbarFadingEnabled(false);
+        appList.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        appList.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
+        appAdapter = new AppAdapter();
+        appList.setAdapter(appAdapter);
+
+        int windowHeight = getWindowManager().getCurrentWindowMetrics().getBounds().height();
+        int listHeight = Math.max(dp(220), Math.min(dp(520), (int) (windowHeight * 0.55f)));
+        root.addView(appList, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, listHeight));
+
+        appList.setOnItemClickListener((parent, view, position, id) -> {
+            AppEntry entry = appAdapter.getItem(position);
+            selectedPackage = entry.packageName;
+            updateSelectedAppText();
+        });
+
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                appAdapter.filter(s == null ? "" : s.toString());
+                appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
+            }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+
+        rescan.setOnClickListener(v -> loadInstalledApps());
 
         selectedApp = text("No app selected", 14);
         selectedApp.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         selectedApp.setTextIsSelectable(true);
         root.addView(selectedApp);
 
-        TextView warning = text(
+        root.addView(text(
                 "Warning: disabling Settings, One UI Home, System UI, or other core packages can make the phone difficult to use. This app refuses to disable itself.",
-                13);
-        root.addView(warning);
+                13));
 
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -187,23 +224,38 @@ public class MainActivity extends Activity {
         result.setMinHeight(dp(90));
         root.addView(result);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(true);
-        scroll.setScrollbarFadingEnabled(false);
-        scroll.addView(root);
-        setContentView(scroll);
+        pageScroll = new ScrollView(this);
+        pageScroll.setFillViewport(true);
+        pageScroll.setVerticalScrollBarEnabled(true);
+        pageScroll.setScrollbarFadingEnabled(false);
+        pageScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        pageScroll.setVerticalScrollbarPosition(View.SCROLLBAR_POSITION_RIGHT);
+        pageScroll.setClipToPadding(true);
+        pageScroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+            v.setPadding(dp(6), bars.top + dp(4), bars.right + dp(12), bars.bottom + dp(12));
+            return insets;
+        });
+        pageScroll.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
+        setContentView(pageScroll);
+        pageScroll.requestApplyInsets();
     }
 
-    private void loadInstalledApps(boolean openChooserAfter) {
+    private void loadInstalledApps() {
         runOnUiThread(() -> appCount.setText("Scanning installed apps…"));
         executor.submit(() -> {
             ArrayList<AppEntry> found = new ArrayList<>();
+            Set<String> seenPackages = new HashSet<>();
             PackageManager pm = getPackageManager();
+
             try {
                 List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS);
                 for (ApplicationInfo ai : apps) {
                     if ((ai.flags & ApplicationInfo.FLAG_INSTALLED) == 0) continue;
+                    if (!seenPackages.add(ai.packageName)) continue;
+
                     String label;
                     try {
                         CharSequence cs = pm.getApplicationLabel(ai);
@@ -224,6 +276,7 @@ public class MainActivity extends Activity {
                         }
                     } catch (Throwable ignored) {
                     }
+
                     found.add(new AppEntry(label, ai.packageName, enabled));
                 }
 
@@ -234,9 +287,11 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     installedApps.clear();
                     installedApps.addAll(found);
-                    appCount.setText("Found " + installedApps.size() + " installed apps for this phone user.");
+                    appAdapter.setApps(installedApps);
+                    String q = searchInput.getText().toString();
+                    appAdapter.filter(q);
+                    appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
                     updateSelectedAppText();
-                    if (openChooserAfter) showAppChooser();
                 });
             } catch (Throwable e) {
                 runOnUiThread(() -> appCount.setText("Could not scan apps: " + shortError(e)));
@@ -244,64 +299,12 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void showAppChooser() {
-        if (installedApps.isEmpty()) {
-            loadInstalledApps(true);
-            return;
-        }
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(6), dp(12), dp(6));
-
-        EditText search = new EditText(this);
-        search.setHint("Search app name or package");
-        search.setSingleLine(true);
-        box.addView(search, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
-
-        ListView list = new ListView(this);
-        AppAdapter adapter = new AppAdapter(installedApps);
-        list.setAdapter(adapter);
-        int windowHeight = getWindowManager().getCurrentWindowMetrics().getBounds().height();
-        int listHeight = Math.max(dp(110), windowHeight - dp(180));
-        box.addView(list, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, listHeight));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Choose installed app")
-                .setView(box)
-                .setNegativeButton("Cancel", null)
-                .create();
-
-        list.setOnItemClickListener((parent, view, position, id) -> {
-            AppEntry entry = adapter.getItem(position);
-            selectedPackage = entry.packageName;
-            updateSelectedAppText();
-            dialog.dismiss();
-        });
-
-        search.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                adapter.filter(s == null ? "" : s.toString());
-            }
-            @Override public void afterTextChanged(Editable s) { }
-        });
-
-        dialog.show();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
-        }
-    }
-
     private void updateSelectedAppText() {
         if (selectedPackage.isEmpty()) {
             selectedApp.setText("No app selected");
             return;
         }
+
         for (AppEntry entry : installedApps) {
             if (entry.packageName.equals(selectedPackage)) {
                 selectedApp.setText("Selected: " + entry.label + " — "
@@ -310,7 +313,9 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        selectedApp.setText("Selected package: " + selectedPackage);
+
+        selectedPackage = "";
+        selectedApp.setText("No app selected");
     }
 
     private void findPairingPort() {
@@ -329,6 +334,7 @@ public class MainActivity extends Activity {
             } finally {
                 try { mdns.stop(); } catch (Exception ignored) { }
             }
+
             int found = port.get();
             if (found > 0) {
                 runOnUiThread(() -> portInput.setText(String.valueOf(found)));
@@ -342,10 +348,12 @@ public class MainActivity extends Activity {
     private void pair() {
         String p = portInput.getText().toString().trim();
         String code = codeInput.getText().toString().trim();
+
         if (p.isEmpty() || code.length() != 6) {
             toast("Enter the pairing port and 6-digit code shown by Wireless debugging.");
             return;
         }
+
         int port;
         try {
             port = Integer.parseInt(p);
@@ -379,6 +387,7 @@ public class MainActivity extends Activity {
                 setStatus("Connected — ready.");
                 return;
             }
+
             boolean ok;
             try {
                 ok = manager.autoConnect(this, 10000);
@@ -386,7 +395,10 @@ public class MainActivity extends Activity {
                 setStatus("Not paired yet. Open Wireless debugging → Pair device with pairing code.");
                 return;
             }
-            setStatus(ok ? "Connected — ready." : "Not connected. Make sure Wireless debugging is ON, then tap Connect / reconnect.");
+
+            setStatus(ok
+                    ? "Connected — ready."
+                    : "Not connected. Make sure Wireless debugging is ON, then tap Connect / reconnect.");
         } catch (Throwable e) {
             setStatus("Connection error: " + shortError(e));
         }
@@ -395,9 +407,10 @@ public class MainActivity extends Activity {
     private void runPackageCommand(boolean enable) {
         String pkg = selectedPackage.trim();
         if (pkg.isEmpty()) {
-            toast("Tap Choose app and select an installed app first.");
+            toast("Tap an app in the installed-app list first.");
             return;
         }
+
         if (getPackageName().equals(pkg) && !enable) {
             toast("App Hide Toggle will not disable itself.");
             return;
@@ -429,10 +442,11 @@ public class MainActivity extends Activity {
                     : "shell:pm disable-user --user 0 " + pkg;
             String output = runShell(manager, command);
             if (output.trim().isEmpty()) output = "Command completed with no text output.";
+
             final String finalOutput = output;
             runOnUiThread(() -> result.setText(finalOutput));
             setStatus(enable ? "Enabled / shown: " + pkg : "Disabled / hidden: " + pkg);
-            loadInstalledApps(false);
+            loadInstalledApps();
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> result.setText(msg));
@@ -492,14 +506,18 @@ public class MainActivity extends Activity {
         private final ArrayList<AppEntry> source = new ArrayList<>();
         private final ArrayList<AppEntry> visible = new ArrayList<>();
 
-        AppAdapter(List<AppEntry> apps) {
+        void setApps(List<AppEntry> apps) {
+            source.clear();
             source.addAll(apps);
+            visible.clear();
             visible.addAll(apps);
+            notifyDataSetChanged();
         }
 
         void filter(String query) {
             String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
             visible.clear();
+
             if (q.isEmpty()) {
                 visible.addAll(source);
             } else {
@@ -510,6 +528,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+
             notifyDataSetChanged();
         }
 
@@ -523,7 +542,9 @@ public class MainActivity extends Activity {
 
             LinearLayout row = new LinearLayout(MainActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             row.setPadding(dp(8), dp(8), dp(8), dp(8));
+            row.setMinimumHeight(dp(62));
 
             ImageView icon = new ImageView(MainActivity.this);
             try {
@@ -531,6 +552,7 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
                 icon.setImageResource(android.R.drawable.sym_def_app_icon);
             }
+
             LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(46), dp(46));
             iconParams.setMargins(0, 0, dp(10), 0);
             row.addView(icon, iconParams);
@@ -538,7 +560,8 @@ public class MainActivity extends Activity {
             LinearLayout texts = new LinearLayout(MainActivity.this);
             texts.setOrientation(LinearLayout.VERTICAL);
 
-            TextView name = text(entry.label + (entry.enabled ? "" : "  [DISABLED]"), 15);
+            String state = entry.enabled ? "Enabled" : "Disabled";
+            TextView name = text(entry.label + "  [" + state + "]", 15);
             name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             texts.addView(name);
 
@@ -548,6 +571,7 @@ public class MainActivity extends Activity {
 
             row.addView(texts, new LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
             return row;
         }
     }
