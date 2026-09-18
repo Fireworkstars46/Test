@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
         buildUi();
         setStatus("Checking Wireless debugging connection…");
         adbExecutor.submit(this::autoConnect);
-        loadInstalledApps();
+        loadInstalledApps(false);
     }
 
     private int dp(int n) {
@@ -220,7 +220,7 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(Editable s) { }
         });
 
-        rescan.setOnClickListener(v -> loadInstalledApps());
+        rescan.setOnClickListener(v -> loadInstalledApps(true));
 
         appList.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
@@ -614,8 +614,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void loadInstalledApps() {
-        runOnUiThread(() -> appCount.setText("Full scanning installed apps + launcher components…"));
+    private void loadInstalledApps(boolean deepAdbScan) {
+        runOnUiThread(() -> appCount.setText(deepAdbScan
+                ? "Full scanning with Wireless ADB…"
+                : "Scanning installed apps…"));
         executor.submit(() -> {
             ArrayList<AppEntry> found = new ArrayList<>();
             Set<String> seenPackages = new HashSet<>();
@@ -637,6 +639,31 @@ public class MainActivity extends Activity {
                             .computeIfAbsent(ri.activityInfo.packageName, k -> new ArrayList<>())
                             .add(ri.activityInfo.name);
                 }
+
+                int adbLauncherTargets = 0;
+                String deepScanNote = "";
+                if (deepAdbScan) {
+                    try {
+                        Map<String, ArrayList<String>> adbLaunchers =
+                                queryLauncherComponentsViaAdb();
+                        for (Map.Entry<String, ArrayList<String>> item : adbLaunchers.entrySet()) {
+                            ArrayList<String> list = launcherComponents.computeIfAbsent(
+                                    item.getKey(), k -> new ArrayList<>());
+                            for (String activity : item.getValue()) {
+                                if (!list.contains(activity)) list.add(activity);
+                            }
+                        }
+                        adbLauncherTargets = adbLaunchers.size();
+                        deepScanNote = "ADB resolver found " + adbLauncherTargets
+                                + " launcher packages. ";
+                    } catch (Throwable e) {
+                        deepScanNote = "ADB deep scan unavailable ("
+                                + shortError(e) + "); local/cache scan used. ";
+                    }
+                }
+
+                final int finalAdbLauncherTargets = adbLauncherTargets;
+                final String finalDeepScanNote = deepScanNote;
 
                 List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_DISABLED_COMPONENTS);
                 for (ApplicationInfo ai : apps) {
@@ -736,15 +763,60 @@ public class MainActivity extends Activity {
                     for (AppEntry e : installedApps) {
                         if (!e.launcherComponents.isEmpty()) launcherTargets++;
                     }
-                    appCount.setText("Full scan complete — "
-                            + installedApps.size() + " apps, "
-                            + launcherTargets + " with launcher targets. Showing "
-                            + appAdapter.getCount() + ".");
+                    if (deepAdbScan) {
+                        appCount.setText("Full scan complete — "
+                                + finalDeepScanNote
+                                + installedApps.size() + " apps, "
+                                + launcherTargets + " with launcher targets. Showing "
+                                + appAdapter.getCount() + ".");
+                    } else {
+                        appCount.setText("Showing " + appAdapter.getCount()
+                                + " of " + installedApps.size()
+                                + " installed apps. Launcher targets: "
+                                + launcherTargets + ".");
+                    }
                 });
             } catch (Throwable e) {
                 runOnUiThread(() -> appCount.setText("Could not scan apps: " + shortError(e)));
             }
         });
+    }
+
+    private Map<String, ArrayList<String>> queryLauncherComponentsViaAdb()
+            throws Exception {
+        AdbConnectionManager manager = requireConnection();
+        if (manager == null) throw new IllegalStateException("Wireless ADB not connected");
+
+        // MATCH_DISABLED_COMPONENTS (0x200) + MATCH_DISABLED_UNTIL_USED_COMPONENTS
+        // (0x8000) + MATCH_ALL (0x20000). This lets the shell resolver return
+        // launcher activities that the normal app-side resolver can omit.
+        String command =
+                "cmd package query-activities --brief --components --user 0 "
+                + "--query-flags 0x28200 "
+                + "-a android.intent.action.MAIN "
+                + "-c android.intent.category.LAUNCHER";
+        String output = runAdbCommandWithMarker(manager, command, 4000);
+
+        Map<String, ArrayList<String>> result = new HashMap<>();
+        if (output == null) return result;
+
+        for (String rawLine : output.split("\\r?\\n")) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (line.isEmpty() || line.startsWith("No activities")) continue;
+            int slash = line.indexOf('/');
+            if (slash <= 0 || slash >= line.length() - 1) continue;
+
+            String pkg = line.substring(0, slash).trim();
+            String activity = line.substring(slash + 1).trim();
+            if (pkg.isEmpty() || activity.isEmpty()) continue;
+            if (activity.startsWith(".")) activity = pkg + activity;
+
+            ArrayList<String> list = result.computeIfAbsent(
+                    pkg, k -> new ArrayList<>());
+            if (!list.contains(activity)) list.add(activity);
+            saveCachedLauncherComponents(pkg, list);
+        }
+        return result;
     }
 
     private ArrayList<String> loadCachedLauncherComponents(String packageName) {
@@ -995,41 +1067,32 @@ public class MainActivity extends Activity {
                                      ComponentName component,
                                      boolean show) throws Exception {
         String flat = component.getPackageName() + "/" + component.getClassName();
-        Throwable last = null;
+        String command = show
+                ? "pm enable --user 0 " + flat
+                : "pm disable --user 0 " + flat;
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            try {
-                if (show) {
-                    String output = runPmStateCommand(
-                            manager, "pm enable --user 0 " + flat, 1800);
-                    if (pmReplyHasAnyState(output, "enabled")) return;
-                    last = new IllegalStateException(
-                            "Unexpected Android reply: " + compactReply(output));
-                } else {
-                    String output = runPmStateCommand(
-                            manager, "pm disable --user 0 " + flat, 1800);
-                    if (pmReplyHasAnyState(output, "disabled", "disabled-user")) return;
-
-                    // Samsung builds can reject COMPONENT_ENABLED_STATE_DISABLED for
-                    // particular activities but accept the per-user disabled state.
-                    String fallback = runPmStateCommand(
-                            manager, "pm disable-user --user 0 " + flat, 1800);
-                    if (pmReplyHasAnyState(fallback, "disabled-user", "disabled")) return;
-
-                    last = new IllegalStateException(
-                            "Unexpected Android reply: " + compactReply(fallback));
-                }
-            } catch (Throwable e) {
-                last = e;
+        AdbStream stream = null;
+        try {
+            stream = manager.openStream("shell:" + command);
+            // PackageManager applies these component changes within a few tens of
+            // milliseconds on this Samsung device. Do not wait for stdout/EOF:
+            // libadb can keep that stream open even after Android applied the state.
+            try { Thread.sleep(140); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-
-            if (attempt == 0) {
-                try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
+        } catch (Throwable first) {
+            // One reconnect + one retry only if the command could not even be sent.
+            try { manager.autoConnect(this, 3500); } catch (Throwable ignored) { }
+            stream = null;
+            stream = manager.openStream("shell:" + command);
+            try { Thread.sleep(140); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } finally {
+            if (stream != null) {
+                try { stream.close(); } catch (Throwable ignored) { }
             }
         }
-
-        if (last instanceof Exception) throw (Exception) last;
-        throw new IllegalStateException("Android did not confirm launcher icon change.");
     }
 
     private void applyPackageState(AdbConnectionManager manager,
