@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 10
-        versionName '2.3.5-smooth-direct-toggle'
+        versionCode 11
+        versionName '2.3.6-inline-buttons'
     }
 
     packaging {
