@@ -257,11 +257,22 @@ public class MainActivity extends Activity {
         logView.setTextIsSelectable(true);
         ScrollView logScroll = new ScrollView(this);
         logScroll.setFillViewport(true);
+        logScroll.setVerticalScrollBarEnabled(true);
+        logScroll.setScrollbarFadingEnabled(false);
+        logScroll.setNestedScrollingEnabled(true);
         logScroll.addView(logView);
         root.addView(logScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(360)));
 
-        setContentView(root);
+        ScrollView pageScroll = new ScrollView(this);
+        pageScroll.setFillViewport(true);
+        pageScroll.setVerticalScrollBarEnabled(true);
+        pageScroll.setScrollbarFadingEnabled(false);
+        pageScroll.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
+
+        setContentView(pageScroll);
     }
 
     private void updateMonitoringButtons() {
