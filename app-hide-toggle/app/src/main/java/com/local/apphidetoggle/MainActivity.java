@@ -404,6 +404,7 @@ public class MainActivity extends Activity {
                 lines.add("✅ Automatic test-app selection: PASS");
                 lines.add("Test app: " + tmpTarget.label);
                 lines.add("Package: " + tmpTarget.packageName);
+                lines.add("Launcher components: " + tmpTarget.launcherComponents);
                 passed++;
             } else {
                 lines.add("❌ Automatic test-app selection: FAIL — no eligible user app found");
@@ -657,12 +658,12 @@ public class MainActivity extends Activity {
             if (manager != null && manager.isConnected()) {
                 for (String activityName : entry.launcherComponents) {
                     try {
-                        Boolean disabled = queryComponentDisabledViaAdb(
+                        Boolean visible = queryComponentLauncherVisibleViaAdb(
                                 manager,
                                 new ComponentName(entry.packageName, activityName));
-                        if (disabled != null) {
+                        if (visible != null) {
                             gotAuthoritativeState = true;
-                            if (!disabled) {
+                            if (visible) {
                                 confirmedShown = true;
                                 break;
                             }
@@ -672,8 +673,8 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // If dumpsys couldn't answer, an Android launch intent is a safe
-            // fallback signal that this is a currently launchable normal app.
+            // If the shell resolver could not answer, an Android launch intent is
+            // a safe fallback signal that this is a currently launchable normal app.
             if (!gotAuthoritativeState) {
                 try {
                     Intent launchIntent = pm.getLaunchIntentForPackage(entry.packageName);
@@ -1383,7 +1384,7 @@ public class MainActivity extends Activity {
                         ? "pm enable --user 0 " + flat
                         : "pm disable --user 0 " + flat;
                 stream = manager.openStream("shell:" + command);
-                try { Thread.sleep(140); } catch (InterruptedException e) {
+                try { Thread.sleep(180); } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             } catch (Throwable e) {
@@ -1394,6 +1395,20 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Primary verification: ask Android's active launcher resolver whether
+            // this exact component is currently visible. The 2.6.1 Crash Monitor
+            // log proved PackageManager accepted state 2/3/1 changes while the
+            // dumpsys parser falsely reported failure.
+            try {
+                Boolean visible = queryComponentLauncherVisibleViaAdb(manager, component);
+                if (visible != null && visible == show) {
+                    return;
+                }
+            } catch (Throwable e) {
+                last = e;
+            }
+
+            // Keep dumpsys as a secondary verification path for unusual launchers.
             try {
                 Boolean disabled = queryComponentDisabledViaAdb(manager, component);
                 if (disabled != null && (show ? !disabled : disabled)) {
@@ -1403,15 +1418,14 @@ public class MainActivity extends Activity {
                 last = e;
             }
 
-            // Samsung has accepted the per-user component state on some apps even
-            // when the regular disable command reported oddly. Use it only as a
-            // second hide attempt, then verify through dumpsys instead of trusting stdout.
+            // Samsung sometimes records a per-user disable more reliably with
+            // disable-user. Only use this as a hide fallback, then verify again.
             if (!show) {
                 AdbStream fallback = null;
                 try {
                     fallback = manager.openStream(
                             "shell:pm disable-user --user 0 " + flat);
-                    try { Thread.sleep(140); } catch (InterruptedException e) {
+                    try { Thread.sleep(180); } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
                 } catch (Throwable e) {
@@ -1420,6 +1434,13 @@ public class MainActivity extends Activity {
                     if (fallback != null) {
                         try { fallback.close(); } catch (Throwable ignored) { }
                     }
+                }
+
+                try {
+                    Boolean visible = queryComponentLauncherVisibleViaAdb(manager, component);
+                    if (Boolean.FALSE.equals(visible)) return;
+                } catch (Throwable e) {
+                    last = e;
                 }
 
                 try {
@@ -1439,6 +1460,50 @@ public class MainActivity extends Activity {
         throw new IllegalStateException(
                 show ? "Android did not re-enable the launcher icon."
                      : "Android did not hide the launcher icon.");
+    }
+
+    private Boolean queryComponentLauncherVisibleViaAdb(
+            AdbConnectionManager manager, ComponentName component) throws Exception {
+        String pkg = component.getPackageName();
+        String target = normalizeComponentClass(pkg, component.getClassName());
+
+        // This asks the same active-launcher resolver used by Full Scan, but restricts
+        // it to one package. Disabled launcher activities disappear from this result,
+        // so it directly verifies the user-visible state we actually care about.
+        String command =
+                "cmd package query-activities --brief --components --user 0 "
+                + "-a android.intent.action.MAIN "
+                + "-c android.intent.category.LAUNCHER "
+                + "-p " + pkg;
+        String output = runAdbCommandWithMarker(manager, command, 3000);
+        if (output == null) return null;
+
+        String trimmed = output.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("No activities")) {
+            return Boolean.FALSE;
+        }
+
+        boolean sawParsableComponent = false;
+        for (String rawLine : output.split("\\r?\\n")) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (line.isEmpty() || line.startsWith("No activities")) continue;
+
+            int slash = line.indexOf('/');
+            if (slash <= 0 || slash >= line.length() - 1) continue;
+
+            String linePkg = line.substring(0, slash).trim();
+            String cls = line.substring(slash + 1).trim();
+            if (!pkg.equals(linePkg) || cls.isEmpty()) continue;
+
+            sawParsableComponent = true;
+            if (target.equals(normalizeComponentClass(pkg, cls))) {
+                return Boolean.TRUE;
+            }
+        }
+
+        // We got a valid resolver response for this package but the target component
+        // is absent, which means that launcher component is not currently resolvable.
+        return sawParsableComponent ? Boolean.FALSE : null;
     }
 
     private Boolean queryComponentDisabledViaAdb(AdbConnectionManager manager,
