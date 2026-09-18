@@ -29,7 +29,6 @@ import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -92,36 +91,24 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(8), 0, dp(8), 0);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(16), dp(14), dp(16), dp(8));
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.VERTICAL);
-        top.setPadding(dp(8), dp(10), dp(8), dp(6));
-
-        TextView title = text("App Hide Toggle", 24);
+        TextView title = text("App Hide Toggle", 26);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        top.addView(title);
+        header.addView(title);
 
-        status = text("Not connected", 13);
+        header.addView(text(
+                "Each app has its own Hide/Show and Disable/Enable buttons directly in the app row, so you never have to scroll to controls at the bottom.",
+                14));
+
+        status = text("Not connected", 15);
         status.setSingleLine(true);
         status.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        top.addView(status);
+        header.addView(status);
 
-        LinearLayout setupPanel = new LinearLayout(this);
-        setupPanel.setOrientation(LinearLayout.VERTICAL);
-        setupPanel.setVisibility(View.GONE);
-
-        Button setupToggle = button("Pairing / connection setup");
-        setupToggle.setOnClickListener(v -> {
-            boolean show = setupPanel.getVisibility() != View.VISIBLE;
-            setupPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-            setupToggle.setText(show ? "Hide pairing setup" : "Pairing / connection setup");
-        });
-        top.addView(setupToggle);
-
-        Button openWireless = button("Open Wireless debugging");
+        Button openWireless = button("Open Developer options / Wireless debugging");
         openWireless.setOnClickListener(v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
@@ -129,28 +116,28 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(Settings.ACTION_SETTINGS));
             }
         });
-        setupPanel.addView(openWireless);
+        header.addView(openWireless);
 
         LinearLayout pairRow = new LinearLayout(this);
         pairRow.setOrientation(LinearLayout.HORIZONTAL);
         portInput = new EditText(this);
         portInput.setHint("Pair port");
         portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        pairRow.addView(portInput, new LinearLayout.LayoutParams(0, dp(54), 1));
+        pairRow.addView(portInput, new LinearLayout.LayoutParams(0, dp(58), 1));
 
         codeInput = new EditText(this);
         codeInput.setHint("6-digit code");
         codeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        pairRow.addView(codeInput, new LinearLayout.LayoutParams(0, dp(54), 1));
-        setupPanel.addView(pairRow);
+        pairRow.addView(codeInput, new LinearLayout.LayoutParams(0, dp(58), 1));
+        header.addView(pairRow);
 
         LinearLayout pairButtons = new LinearLayout(this);
         pairButtons.setOrientation(LinearLayout.HORIZONTAL);
         Button findPort = button("Find pair port");
         Button pair = button("Pair");
-        pairButtons.addView(findPort, new LinearLayout.LayoutParams(0, dp(54), 1));
-        pairButtons.addView(pair, new LinearLayout.LayoutParams(0, dp(54), 1));
-        setupPanel.addView(pairButtons);
+        pairButtons.addView(findPort, new LinearLayout.LayoutParams(0, dp(58), 1));
+        pairButtons.addView(pair, new LinearLayout.LayoutParams(0, dp(58), 1));
+        header.addView(pairButtons);
         findPort.setOnClickListener(v -> findPairingPort());
         pair.setOnClickListener(v -> pair());
 
@@ -159,34 +146,33 @@ public class MainActivity extends Activity {
             setStatus("Connecting…");
             executor.submit(this::autoConnect);
         });
-        setupPanel.addView(connect);
-        top.addView(setupPanel);
+        header.addView(connect);
+
+        TextView appsLabel = text("Installed apps", 17);
+        appsLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        header.addView(appsLabel);
+
+        header.addView(text(
+                "Eye = launcher icon shown/hidden   •   ✓ = enabled   •   ✕ = disabled",
+                12));
+
+        appCount = text("Scanning installed apps…", 13);
+        header.addView(appCount);
 
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
 
         searchInput = new EditText(this);
-        searchInput.setHint("Search apps");
+        searchInput.setHint("Search app name or package");
         searchInput.setSingleLine(true);
-        searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(52), 1));
+        searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(58), 1));
 
         Button rescan = button("Rescan");
-        rescan.setFocusable(false);
-        rescan.setFocusableInTouchMode(false);
-        searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(100), dp(52)));
-        top.addView(searchRow);
+        searchRow.addView(rescan, new LinearLayout.LayoutParams(dp(110), dp(58)));
+        header.addView(searchRow);
 
-        appCount = text("Scanning installed apps…", 12);
-        top.addView(appCount);
-
-        top.addView(text("Eye = shown/hidden   •   ✓ = enabled   •   ✕ = disabled", 11));
-
-        result = text("", 11);
+        result = text("", 12);
         result.setVisibility(View.GONE);
-
-        root.addView(top, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         appList = new ListView(this);
         appList.setVerticalScrollBarEnabled(true);
@@ -196,50 +182,32 @@ public class MainActivity extends Activity {
         appList.setSmoothScrollbarEnabled(true);
         appList.setFastScrollEnabled(true);
         appList.setClipToPadding(true);
-        appList.setItemsCanFocus(false);
-        appList.setChoiceMode(ListView.CHOICE_MODE_NONE);
-        appList.setFocusable(false);
-        appList.setFocusableInTouchMode(false);
+        appList.addHeaderView(header, null, false);
 
         appAdapter = new AppAdapter();
         appList.setAdapter(appAdapter);
 
-        root.addView(appList, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
 
         searchInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 appAdapter.filter(s == null ? "" : s.toString());
-                appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size());
+                appCount.setText("Showing " + appAdapter.getCount() + " of " + installedApps.size() + " installed apps.");
             }
             @Override public void afterTextChanged(Editable s) { }
         });
 
         rescan.setOnClickListener(v -> loadInstalledApps());
 
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
+        appList.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(dp(8), bars.top + dp(2), bars.right + dp(8), bars.bottom + dp(4));
+            v.setPadding(dp(6), bars.top + dp(4), bars.right + dp(12), bars.bottom + dp(12));
             return insets;
         });
 
-        setContentView(root);
-        root.requestApplyInsets();
-    }
-
-    private void updateVisibleRow(AppEntry entry) {
-        if (entry == null) return;
-        for (int i = 0; i < appList.getChildCount(); i++) {
-            View child = appList.getChildAt(i);
-            Object tag = child.getTag();
-            if (!(tag instanceof RowHolder)) continue;
-            RowHolder holder = (RowHolder) tag;
-            if (entry.packageName.equals(holder.boundPackage)) {
-                bindRow(holder, entry);
-                return;
-            }
-        }
+        setContentView(appList);
+        appList.requestApplyInsets();
     }
 
     private void loadInstalledApps() {
@@ -339,6 +307,20 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void updateVisibleRow(AppEntry entry) {
+        if (entry == null) return;
+        for (int i = 0; i < appList.getChildCount(); i++) {
+            View child = appList.getChildAt(i);
+            Object tag = child.getTag();
+            if (!(tag instanceof RowHolder)) continue;
+            RowHolder holder = (RowHolder) tag;
+            if (entry.packageName.equals(holder.boundPackage)) {
+                bindRow(holder, entry);
+                return;
+            }
+        }
+    }
+
     private void findPairingPort() {
         setStatus("Finding Wireless debugging pairing port…");
         executor.submit(() -> {
@@ -426,7 +408,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleVisibility(AppEntry entry) {
-        if (entry == null) return;
+        if (entry == null || entry.busyVisibility) return;
         if (entry.launcherComponents.isEmpty()) {
             toast("This app has no launcher icon to hide or show.");
             return;
@@ -439,13 +421,11 @@ public class MainActivity extends Activity {
         boolean show = !entry.launcherShown;
         entry.busyVisibility = true;
         updateVisibleRow(entry);
-        result.setText("");
-        setStatus((show ? "Showing " : "Hiding ") + entry.packageName + "…");
         executor.submit(() -> executeVisibilityToggle(entry, show));
     }
 
     private void toggleEnabled(AppEntry entry) {
-        if (entry == null) return;
+        if (entry == null || entry.busyEnabled) return;
         if (getPackageName().equals(entry.packageName) && entry.enabled) {
             toast("App Hide Toggle will not disable itself.");
             return;
@@ -454,8 +434,6 @@ public class MainActivity extends Activity {
         boolean enable = !entry.enabled;
         entry.busyEnabled = true;
         updateVisibleRow(entry);
-        result.setText("");
-        setStatus((enable ? "Enabling " : "Disabling ") + entry.packageName + "…");
         executor.submit(() -> executeEnabledToggle(entry, enable));
     }
 
@@ -479,115 +457,59 @@ public class MainActivity extends Activity {
     private void executeVisibilityToggle(AppEntry entry, boolean show) {
         try {
             AdbConnectionManager manager = requireConnection();
-            if (manager == null) {
-                runOnUiThread(() -> {
-                    entry.busyVisibility = false;
-                    updateVisibleRow(entry);
-                });
-                return;
-            }
+            if (manager == null) throw new IllegalStateException("Not connected");
 
-            StringBuilder output = new StringBuilder();
             for (String activityName : entry.launcherComponents) {
                 String component = entry.packageName + "/" + activityName;
                 String command = show
                         ? "shell:pm enable --user 0 " + component
                         : "shell:pm disable-user --user 0 " + component;
-                String one = runPackageShellChecked(manager, command);
-                if (!one.trim().isEmpty()) output.append(one);
+                runPackageCommandWithRetry(manager, command);
             }
 
-            if (output.length() == 0) {
-                output.append(show ? "Launcher icon shown." : "Launcher icon hidden.");
-            }
-
-            Thread.sleep(120);
-            boolean actualShown = isLauncherShownNow(entry);
-            if (actualShown != show) {
-                for (String activityName : entry.launcherComponents) {
-                    String component = entry.packageName + "/" + activityName;
-                    String command = show
-                            ? "shell:pm enable --user 0 " + component
-                            : "shell:pm disable-user --user 0 " + component;
-                    runPackageShellChecked(manager, command);
-                }
-                Thread.sleep(180);
-                actualShown = isLauncherShownNow(entry);
-            }
-            if (actualShown != show) {
-                throw new IOException("Android did not apply the launcher visibility change.");
-            }
-
-            final String finalOutput = output.toString();
             runOnUiThread(() -> {
                 entry.launcherShown = show;
                 entry.busyVisibility = false;
-                result.setText(finalOutput);
                 updateVisibleRow(entry);
+                toast((show ? "Shown: " : "Hidden: ") + entry.label);
             });
-            setStatus((show ? "Shown: " : "Hidden: ") + entry.packageName);
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> {
                 entry.busyVisibility = false;
-                result.setText(msg);
                 updateVisibleRow(entry);
+                toast("Hide/Show failed: " + msg);
             });
-            setStatus("Command failed: " + msg);
         }
     }
 
     private void executeEnabledToggle(AppEntry entry, boolean enable) {
         try {
             AdbConnectionManager manager = requireConnection();
-            if (manager == null) {
-                runOnUiThread(() -> {
-                    entry.busyEnabled = false;
-                    updateVisibleRow(entry);
-                });
-                return;
-            }
+            if (manager == null) throw new IllegalStateException("Not connected");
 
-            String pkg = entry.packageName;
             String command = enable
-                    ? "shell:pm enable --user 0 " + pkg
-                    : "shell:pm disable-user --user 0 " + pkg;
-            String output = runPackageShellChecked(manager, command);
-            if (output.trim().isEmpty()) {
-                output = enable ? "App enabled." : "App disabled.";
-            }
+                    ? "shell:pm enable --user 0 " + entry.packageName
+                    : "shell:pm disable-user --user 0 " + entry.packageName;
+            runPackageCommandWithRetry(manager, command);
 
-            Thread.sleep(120);
-            boolean actualEnabled = isPackageEnabledNow(pkg);
-            if (actualEnabled != enable) {
-                output = runPackageShellChecked(manager, command);
-                Thread.sleep(180);
-                actualEnabled = isPackageEnabledNow(pkg);
-            }
-            if (actualEnabled != enable) {
-                throw new IOException("Android did not apply the enabled/disabled change.");
-            }
-
-            final String finalOutput = output;
             runOnUiThread(() -> {
                 entry.enabled = enable;
                 entry.busyEnabled = false;
-                result.setText(finalOutput);
                 updateVisibleRow(entry);
+                toast((enable ? "Enabled: " : "Disabled: ") + entry.label);
             });
-            setStatus((enable ? "Enabled: " : "Disabled: ") + pkg);
         } catch (Throwable e) {
             String msg = shortError(e);
             runOnUiThread(() -> {
                 entry.busyEnabled = false;
-                result.setText(msg);
                 updateVisibleRow(entry);
+                toast("Enable/Disable failed: " + msg);
             });
-            setStatus("Command failed: " + msg);
         }
     }
 
-    private String runPackageShellChecked(AdbConnectionManager manager, String service) throws Exception {
+    private String runPackageCommandWithRetry(AdbConnectionManager manager, String service) throws Exception {
         String output;
         try {
             output = runShell(manager, service);
@@ -607,44 +529,9 @@ public class MainActivity extends Activity {
                 || lower.startsWith("error:")
                 || lower.contains("\nerror:")
                 || lower.contains("failed to")) {
-            throw new IOException(output.trim());
+            throw new IllegalStateException(output.trim());
         }
         return output == null ? "" : output;
-    }
-
-    private boolean isLauncherShownNow(AppEntry entry) {
-        PackageManager pm = getPackageManager();
-        for (String activityName : entry.launcherComponents) {
-            try {
-                ComponentName component = new ComponentName(entry.packageName, activityName);
-                int state = pm.getComponentEnabledSetting(component);
-                if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-                        || state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
-                    return true;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        return false;
-    }
-
-    private boolean isPackageEnabledNow(String pkg) {
-        PackageManager pm = getPackageManager();
-        try {
-            int state = pm.getApplicationEnabledSetting(pkg);
-            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
-                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
-                return false;
-            }
-            if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
-                return true;
-            }
-            ApplicationInfo ai = pm.getApplicationInfo(pkg, PackageManager.MATCH_DISABLED_COMPONENTS);
-            return ai.enabled;
-        } catch (Throwable ignored) {
-            return false;
-        }
     }
 
     private String runShell(AdbConnectionManager manager, String service) throws Exception {
@@ -880,7 +767,6 @@ public class MainActivity extends Activity {
                 holder = (RowHolder) convertView.getTag();
             }
 
-            holder.boundPackage = entry.packageName;
             bindRow(holder, entry);
             return convertView;
         }
