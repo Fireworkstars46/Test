@@ -10,8 +10,8 @@ android {
         applicationId 'com.local.apphidetoggle'
         minSdk 31
         targetSdk 35
-        versionCode 20
-        versionName '2.4.5-state-verified-toggles'
+        versionCode 21
+        versionName '2.4.6-nonblocking-toggles'
     }
 
     packaging {
