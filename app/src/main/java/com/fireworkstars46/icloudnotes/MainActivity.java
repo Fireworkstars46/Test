@@ -9,7 +9,6 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
-import android.provider.Settings;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
@@ -24,6 +23,7 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
     private static final String START_URL = "https://www.icloud.com/notes/";
     private static final int FILE_CHOOSER_REQUEST = 401;
+
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
 
@@ -33,6 +33,11 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.WHITE);
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        webView.setVerticalScrollBarEnabled(false);
+        webView.setHorizontalScrollBarEnabled(false);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         setContentView(webView);
 
         WebSettings s = webView.getSettings();
@@ -43,13 +48,21 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setLoadsImagesAutomatically(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setSupportZoom(true);
-        s.setBuiltInZoomControls(true);
+
+        // Keep the iCloud mobile layout at normal phone sizing.
+        s.setTextZoom(100);
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(false);
+
+        // Favor the normal WebView cache and pre-render nearby content for smoother scrolling.
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setOffscreenPreRaster(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
+        // Remove the WebView marker while retaining the Android mobile browser identity.
         String ua = s.getUserAgentString();
         if (ua != null) {
             s.setUserAgentString(ua.replace("; wv", ""));
@@ -57,7 +70,7 @@ public class MainActivity extends Activity {
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        cookies.setAcceptThirdPartyCookies(webView, true);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -80,12 +93,14 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback, FileChooserParams params) {
-                if (fileCallback != null) fileCallback.onReceiveValue(null);
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileCallback != null) {
+                    fileCallback.onReceiveValue(null);
+                }
                 fileCallback = callback;
+
                 try {
-                    Intent intent = params.createIntent();
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                    startActivityForResult(params.createIntent(), FILE_CHOOSER_REQUEST);
                     return true;
                 } catch (ActivityNotFoundException e) {
                     fileCallback = null;
@@ -97,14 +112,18 @@ public class MainActivity extends Activity {
 
         webView.setDownloadListener(new DownloadListener() {
             @Override
-            public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+            public void onDownloadStart(String url, String userAgent, String contentDisposition,
+                                        String mimeType, long contentLength) {
                 try {
                     DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
                     request.setMimeType(mimeType);
                     request.addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url));
                     request.addRequestHeader("User-Agent", userAgent);
                     request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, guessFileName(url, contentDisposition, mimeType));
+                    request.setDestinationInExternalPublicDir(
+                            Environment.DIRECTORY_DOWNLOADS,
+                            android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
+                    );
                     ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(request);
                     Toast.makeText(MainActivity.this, "Downloading…", Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
@@ -124,23 +143,23 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String guessFileName(String url, String contentDisposition, String mimeType) {
-        return android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType);
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == FILE_CHOOSER_REQUEST) {
             Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-            if (fileCallback != null) fileCallback.onReceiveValue(result);
+            if (fileCallback != null) {
+                fileCallback.onReceiveValue(result);
+            }
             fileCallback = null;
         }
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
+        if (webView != null) {
+            webView.saveState(outState);
+        }
         super.onSaveInstanceState(outState);
     }
 
