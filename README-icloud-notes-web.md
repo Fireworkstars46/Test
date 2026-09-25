@@ -12,7 +12,7 @@ Features:
 - External non-web links open in their matching Android app
 - Optimized WebView scrolling and hardware acceleration
 - Android 16 safe-area handling so the iCloud header is not hidden under the status bar
-- Faster vertical fling scrolling for long notes
+- Fast-flick mode: quick vertical flicks cancel the slow glide and instantly jump several screen-heights
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
