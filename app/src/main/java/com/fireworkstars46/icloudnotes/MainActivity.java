@@ -122,14 +122,15 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
-                // Avoid CSS smooth-scroll fighting Android's own touch/fling physics.
+                // Keep the page from adding its own smooth-scroll animation on top of
+                // Android/WebView's momentum physics.
                 view.evaluateJavascript(
                         "(function(){"
                                 + "var id='s22-notes-scroll-tweaks';"
                                 + "if(!document.getElementById(id)){"
                                 + "var s=document.createElement('style');"
                                 + "s.id=id;"
-                                + "s.textContent='html,body,*{scroll-behavior:auto!important;overscroll-behavior:none!important;}';"
+                                + "s.textContent='html,body,*{scroll-behavior:auto!important;}';"
                                 + "document.documentElement.appendChild(s);"
                                 + "}"
                                 + "})();",
@@ -226,23 +227,16 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        // Slow finger movement stays controllable, while fast movement becomes very sensitive.
-        private static final float MIN_DRAG_MULTIPLIER = 1.35f;
-        private static final float MAX_DRAG_MULTIPLIER = 4.75f;
-        private static final float SPEED_FOR_MAX_MULTIPLIER = 2600f;
-
-        // A fast release gets a strong but still smooth WebView fling.
-        private static final float CUSTOM_FLING_THRESHOLD = 950f;
-        private static final float FLING_MULTIPLIER = 4.1f;
-        private static final int MAX_FLING_VELOCITY = 65000;
-        private static final float MIN_GESTURE_DP = 22f;
+        // Preserve normal finger-following behavior, then boost only the release
+        // momentum. This gives a Notes-like continue-and-slow-down feel.
+        private static final float BOOST_THRESHOLD = 500f;
+        private static final float FLING_MULTIPLIER = 5.6f;
+        private static final int MAX_FLING_VELOCITY = 85000;
+        private static final float MIN_VERTICAL_GESTURE_DP = 12f;
 
         private VelocityTracker velocityTracker;
-        private float rawDownX;
-        private float rawDownY;
-        private float lastRawY;
-        private float virtualY;
-        private long lastEventTime;
+        private float downX;
+        private float downY;
 
         FastWebView(Context context) {
             super(context);
@@ -250,90 +244,50 @@ public class MainActivity extends Activity {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            final int action = event.getActionMasked();
-            MotionEvent transformed = MotionEvent.obtain(event);
+            int action = event.getActionMasked();
 
             if (action == MotionEvent.ACTION_DOWN) {
                 recycleTracker();
                 velocityTracker = VelocityTracker.obtain();
-                velocityTracker.addMovement(event);
-
-                rawDownX = event.getX();
-                rawDownY = event.getY();
-                lastRawY = rawDownY;
-                virtualY = rawDownY;
-                lastEventTime = event.getEventTime();
-
-                transformed.setLocation(event.getX(), virtualY);
-                boolean handled = super.onTouchEvent(transformed);
-                transformed.recycle();
-                return handled;
+                downX = event.getX();
+                downY = event.getY();
             }
 
             if (velocityTracker != null) {
                 velocityTracker.addMovement(event);
             }
 
-            if (action == MotionEvent.ACTION_MOVE) {
-                long now = event.getEventTime();
-                long dtMs = Math.max(1L, now - lastEventTime);
-                float rawDeltaY = event.getY() - lastRawY;
-                float instantaneousSpeed = Math.abs(rawDeltaY) * 1000f / dtMs;
-
-                float t = Math.min(1f, instantaneousSpeed / SPEED_FOR_MAX_MULTIPLIER);
-                // Ease the multiplier upward so it feels smooth rather than switching modes.
-                float eased = t * t * (3f - 2f * t);
-                float multiplier =
-                        MIN_DRAG_MULTIPLIER
-                                + (MAX_DRAG_MULTIPLIER - MIN_DRAG_MULTIPLIER) * eased;
-
-                virtualY += rawDeltaY * multiplier;
-                transformed.setLocation(event.getX(), virtualY);
-
-                lastRawY = event.getY();
-                lastEventTime = now;
-
-                boolean handled = super.onTouchEvent(transformed);
-                transformed.recycle();
-                return handled;
-            }
-
             if (action == MotionEvent.ACTION_UP && velocityTracker != null) {
                 velocityTracker.computeCurrentVelocity(1000);
 
                 float velocityY = velocityTracker.getYVelocity();
-                float dx = event.getX() - rawDownX;
-                float dy = event.getY() - rawDownY;
-                float minGesture =
-                        MIN_GESTURE_DP * getResources().getDisplayMetrics().density;
+                float dx = event.getX() - downX;
+                float dy = event.getY() - downY;
+                float minDistance =
+                        MIN_VERTICAL_GESTURE_DP * getResources().getDisplayMetrics().density;
 
                 boolean verticalGesture =
-                        Math.abs(dy) >= minGesture
-                                && Math.abs(dy) > Math.abs(dx) * 1.10f;
+                        Math.abs(dy) >= minDistance
+                                && Math.abs(dy) > Math.abs(dx) * 1.05f;
 
-                if (verticalGesture && Math.abs(velocityY) >= CUSTOM_FLING_THRESHOLD) {
-                    // Cancel WebView's ordinary slow fling, then start a much faster native
-                    // WebView fling. flingScroll stays animated/smooth instead of jumping.
-                    transformed.setAction(MotionEvent.ACTION_CANCEL);
-                    transformed.setLocation(event.getX(), virtualY);
-                    super.onTouchEvent(transformed);
+                // First let WebView finish the exact same normal touch gesture it
+                // would receive without customization. That preserves smooth drag
+                // behavior and starts its ordinary inertia.
+                boolean handled = super.onTouchEvent(event);
 
+                if (verticalGesture && Math.abs(velocityY) >= BOOST_THRESHOLD) {
                     int boostedVelocity = clamp(
                             Math.round(-velocityY * FLING_MULTIPLIER),
                             -MAX_FLING_VELOCITY,
                             MAX_FLING_VELOCITY
                     );
 
-                    post(() -> flingScroll(0, boostedVelocity));
-
-                    transformed.recycle();
-                    recycleTracker();
-                    return true;
+                    // Replace/strengthen the ordinary momentum immediately after
+                    // release. flingScroll uses WebView's native animation and
+                    // deceleration, so it keeps moving and gradually slows down.
+                    postDelayed(() -> flingScroll(0, boostedVelocity), 8);
                 }
 
-                transformed.setLocation(event.getX(), virtualY);
-                boolean handled = super.onTouchEvent(transformed);
-                transformed.recycle();
                 recycleTracker();
                 return handled;
             }
@@ -342,10 +296,7 @@ public class MainActivity extends Activity {
                 recycleTracker();
             }
 
-            transformed.setLocation(event.getX(), virtualY);
-            boolean handled = super.onTouchEvent(transformed);
-            transformed.recycle();
-            return handled;
+            return super.onTouchEvent(event);
         }
 
         private void recycleTracker() {
