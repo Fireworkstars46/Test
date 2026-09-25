@@ -9,11 +9,10 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.ValueCallback;
@@ -81,7 +80,6 @@ public class MainActivity extends Activity {
         s.setLoadsImagesAutomatically(true);
         s.setMediaPlaybackRequiresUserGesture(false);
 
-        // Keep Apple's mobile Notes page at normal phone size.
         s.setTextZoom(100);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
@@ -89,7 +87,6 @@ public class MainActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(false);
 
-        // Smooth rendering/caching without changing Apple's page layout.
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setOffscreenPreRaster(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -125,16 +122,50 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
-                // Prevent animated/smooth-scroll CSS from making long notes feel sluggish.
                 view.evaluateJavascript(
                         "(function(){"
                                 + "var id='s22-notes-scroll-tweaks';"
                                 + "if(!document.getElementById(id)){"
                                 + "var s=document.createElement('style');"
                                 + "s.id=id;"
-                                + "s.textContent='html,body,*{scroll-behavior:auto!important;}';"
+                                + "s.textContent='html,body,*{scroll-behavior:auto!important;overscroll-behavior:none!important;}';"
                                 + "document.documentElement.appendChild(s);"
                                 + "}"
+                                + "window.__s22InstantFlick=function(dir,screens,xPx,yPx){"
+                                + "try{"
+                                + "var dpr=window.devicePixelRatio||1;"
+                                + "var x=xPx/dpr,y=yPx/dpr;"
+                                + "function scrollable(el){"
+                                + "if(!el)return false;"
+                                + "var cs=getComputedStyle(el);"
+                                + "var oy=cs.overflowY;"
+                                + "return el.scrollHeight>el.clientHeight+40 && (oy==='auto'||oy==='scroll'||oy==='overlay');"
+                                + "}"
+                                + "var el=document.elementFromPoint(x,y);"
+                                + "var p=el;"
+                                + "while(p&&p!==document.documentElement&&!scrollable(p)){p=p.parentElement;}"
+                                + "if(p&&scrollable(p)){el=p;}else{"
+                                + "var best=null,bestScore=0,all=document.querySelectorAll('*');"
+                                + "for(var i=0;i<all.length;i++){"
+                                + "var n=all[i];"
+                                + "if(!scrollable(n))continue;"
+                                + "var r=n.getBoundingClientRect();"
+                                + "if(r.height<120||r.bottom<0||r.top>innerHeight)continue;"
+                                + "var score=Math.min(r.height,innerHeight)*(n.scrollHeight-n.clientHeight);"
+                                + "if(score>bestScore){best=n;bestScore=score;}"
+                                + "}"
+                                + "el=best||(document.scrollingElement||document.documentElement);"
+                                + "}"
+                                + "var root=(document.scrollingElement||document.documentElement);"
+                                + "var isRoot=(el===root||el===document.body||el===document.documentElement);"
+                                + "var h=(isRoot?innerHeight:el.clientHeight)||innerHeight;"
+                                + "var amt=Math.round(h*screens*dir);"
+                                + "var cur=isRoot?root.scrollTop:el.scrollTop;"
+                                + "var max=(isRoot?root.scrollHeight-root.clientHeight:el.scrollHeight-el.clientHeight);"
+                                + "var next=Math.max(0,Math.min(max,cur+amt));"
+                                + "if(isRoot){root.scrollTop=next;}else{el.scrollTop=next;}"
+                                + "}catch(e){}"
+                                + "};"
                                 + "})();",
                         null
                 );
@@ -229,54 +260,90 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        private static final float FLING_MULTIPLIER = 1.85f;
-        private static final int MAX_FLING_VELOCITY = 30000;
+        private static final float FAST_FLING_THRESHOLD = 2200f;
+        private static final float MIN_FAST_SWIPE_DP = 42f;
 
-        private final GestureDetector gestureDetector;
+        private VelocityTracker velocityTracker;
+        private float downX;
+        private float downY;
 
         FastWebView(Context context) {
             super(context);
-
-            gestureDetector = new GestureDetector(
-                    context,
-                    new GestureDetector.SimpleOnGestureListener() {
-                        @Override
-                        public boolean onDown(MotionEvent e) {
-                            return true;
-                        }
-
-                        @Override
-                        public boolean onFling(
-                                MotionEvent e1,
-                                MotionEvent e2,
-                                float velocityX,
-                                float velocityY
-                        ) {
-                            int boostedY = clamp(
-                                    Math.round(-velocityY * FLING_MULTIPLIER),
-                                    -MAX_FLING_VELOCITY,
-                                    MAX_FLING_VELOCITY
-                            );
-
-                            // Let WebView process the touch first, then replace its normal
-                            // fling with the faster vertical fling.
-                            FastWebView.this.postDelayed(
-                                    () -> FastWebView.this.flingScroll(0, boostedY),
-                                    16
-                            );
-                            return false;
-                        }
-                    }
-            );
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            gestureDetector.onTouchEvent(event);
+            int action = event.getActionMasked();
+
+            if (action == MotionEvent.ACTION_DOWN) {
+                recycleTracker();
+                velocityTracker = VelocityTracker.obtain();
+                velocityTracker.addMovement(event);
+                downX = event.getX();
+                downY = event.getY();
+                return super.onTouchEvent(event);
+            }
+
+            if (velocityTracker != null) {
+                velocityTracker.addMovement(event);
+            }
+
+            if (action == MotionEvent.ACTION_UP && velocityTracker != null) {
+                velocityTracker.computeCurrentVelocity(1000);
+
+                float velocityY = velocityTracker.getYVelocity();
+                float dx = event.getX() - downX;
+                float dy = event.getY() - downY;
+                float minDistance = MIN_FAST_SWIPE_DP * getResources().getDisplayMetrics().density;
+
+                boolean fastVerticalFlick =
+                        Math.abs(velocityY) >= FAST_FLING_THRESHOLD
+                                && Math.abs(dy) >= minDistance
+                                && Math.abs(dy) > Math.abs(dx) * 1.15f;
+
+                if (fastVerticalFlick) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.onTouchEvent(cancel);
+                    cancel.recycle();
+
+                    final int direction = velocityY < 0 ? 1 : -1;
+                    final float screens = clamp(Math.abs(velocityY) / 2100f, 2.25f, 6.5f);
+                    final float x = event.getX();
+                    final float y = event.getY();
+
+                    post(() -> evaluateJavascript(
+                            "window.__s22InstantFlick&&window.__s22InstantFlick("
+                                    + direction + ","
+                                    + screens + ","
+                                    + x + ","
+                                    + y + ");",
+                            null
+                    ));
+
+                    recycleTracker();
+                    return true;
+                }
+
+                recycleTracker();
+                return super.onTouchEvent(event);
+            }
+
+            if (action == MotionEvent.ACTION_CANCEL) {
+                recycleTracker();
+            }
+
             return super.onTouchEvent(event);
         }
 
-        private static int clamp(int value, int min, int max) {
+        private void recycleTracker() {
+            if (velocityTracker != null) {
+                velocityTracker.recycle();
+                velocityTracker = null;
+            }
+        }
+
+        private static float clamp(float value, float min, float max) {
             return Math.max(min, Math.min(max, value));
         }
     }
