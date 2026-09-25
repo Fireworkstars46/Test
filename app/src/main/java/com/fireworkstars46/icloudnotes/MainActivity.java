@@ -9,7 +9,11 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.ValueCallback;
@@ -18,27 +22,55 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String START_URL = "https://www.icloud.com/notes/";
     private static final int FILE_CHOOSER_REQUEST = 401;
 
-    private WebView webView;
+    private FastWebView webView;
     private ValueCallback<Uri[]> fileCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        webView = new WebView(this);
+        getWindow().setStatusBarColor(Color.WHITE);
+        getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        );
+
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.WHITE);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = insets.getSystemWindowInsetTop();
+            int bottom = insets.getSystemWindowInsetBottom();
+
+            if (v.getPaddingTop() != top || v.getPaddingBottom() != bottom) {
+                v.setPadding(0, top, 0, bottom);
+            }
+            return insets;
+        });
+
+        webView = new FastWebView(this);
         webView.setBackgroundColor(Color.WHITE);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
-        setContentView(webView);
+
+        root.addView(
+                webView,
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                )
+        );
+        setContentView(root);
+        root.requestApplyInsets();
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -49,7 +81,7 @@ public class MainActivity extends Activity {
         s.setLoadsImagesAutomatically(true);
         s.setMediaPlaybackRequiresUserGesture(false);
 
-        // Keep the iCloud mobile layout at normal phone sizing.
+        // Keep Apple's mobile Notes page at normal phone size.
         s.setTextZoom(100);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
@@ -57,12 +89,11 @@ public class MainActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(false);
 
-        // Favor the normal WebView cache and pre-render nearby content for smoother scrolling.
+        // Smooth rendering/caching without changing Apple's page layout.
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setOffscreenPreRaster(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
-        // Remove the WebView marker while retaining the Android mobile browser identity.
         String ua = s.getUserAgentString();
         if (ua != null) {
             s.setUserAgentString(ua.replace("; wv", ""));
@@ -88,6 +119,25 @@ public class MainActivity extends Activity {
                     Toast.makeText(MainActivity.this, "No app can open this link.", Toast.LENGTH_SHORT).show();
                 }
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+
+                // Prevent animated/smooth-scroll CSS from making long notes feel sluggish.
+                view.evaluateJavascript(
+                        "(function(){"
+                                + "var id='s22-notes-scroll-tweaks';"
+                                + "if(!document.getElementById(id)){"
+                                + "var s=document.createElement('style');"
+                                + "s.id=id;"
+                                + "s.textContent='html,body,*{scroll-behavior:auto!important;}';"
+                                + "document.documentElement.appendChild(s);"
+                                + "}"
+                                + "})();",
+                        null
+                );
             }
         });
 
@@ -119,7 +169,9 @@ public class MainActivity extends Activity {
                     request.setMimeType(mimeType);
                     request.addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url));
                     request.addRequestHeader("User-Agent", userAgent);
-                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    request.setNotificationVisibility(
+                            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    );
                     request.setDestinationInExternalPublicDir(
                             Environment.DIRECTORY_DOWNLOADS,
                             android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
@@ -130,7 +182,11 @@ public class MainActivity extends Activity {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                     } catch (Exception ignored) {
-                        Toast.makeText(MainActivity.this, "Could not download this file.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Could not download this file.",
+                                Toast.LENGTH_SHORT
+                        ).show();
                     }
                 }
             }
@@ -169,6 +225,59 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    private static class FastWebView extends WebView {
+        private static final float FLING_MULTIPLIER = 1.85f;
+        private static final int MAX_FLING_VELOCITY = 30000;
+
+        private final GestureDetector gestureDetector;
+
+        FastWebView(Context context) {
+            super(context);
+
+            gestureDetector = new GestureDetector(
+                    context,
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onDown(MotionEvent e) {
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onFling(
+                                MotionEvent e1,
+                                MotionEvent e2,
+                                float velocityX,
+                                float velocityY
+                        ) {
+                            int boostedY = clamp(
+                                    Math.round(-velocityY * FLING_MULTIPLIER),
+                                    -MAX_FLING_VELOCITY,
+                                    MAX_FLING_VELOCITY
+                            );
+
+                            // Let WebView process the touch first, then replace its normal
+                            // fling with the faster vertical fling.
+                            FastWebView.this.postDelayed(
+                                    () -> FastWebView.this.flingScroll(0, boostedY),
+                                    16
+                            );
+                            return false;
+                        }
+                    }
+            );
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            gestureDetector.onTouchEvent(event);
+            return super.onTouchEvent(event);
+        }
+
+        private static int clamp(int value, int min, int max) {
+            return Math.max(min, Math.min(max, value));
         }
     }
 }
