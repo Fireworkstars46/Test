@@ -25,39 +25,15 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build unsigned release APK
-        run: gradle --no-daemon assembleRelease
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
 
-      - name: Copy unsigned release APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="$(find app/build/outputs/apk/release -type f -name '*unsigned*.apk' | head -n 1)"
-          test -f "$APK"
-          cp "$APK" iCloud-Notes-S22-v1.2-unsigned-release.apk
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk iCloud-Notes-S22.apk
 
-      - name: Package Android signing tool
-        shell: bash
-        run: |
-          set -euo pipefail
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$APKSIGNER"
-          TOOL_DIR="$(dirname "$APKSIGNER")"
-          mkdir -p android-sign-tools/lib
-          cp "$APKSIGNER" android-sign-tools/apksigner
-          cp "$TOOL_DIR/lib/apksigner.jar" android-sign-tools/lib/apksigner.jar
-          chmod +x android-sign-tools/apksigner
-
-      - name: Upload unsigned release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: iCloud-Notes-S22-v1.2-unsigned-release
-          path: iCloud-Notes-S22-v1.2-unsigned-release.apk
-          if-no-files-found: error
-
-      - name: Upload Android signing tool
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-sign-tools
-          path: android-sign-tools
+          name: iCloud-Notes-S22
+          path: iCloud-Notes-S22.apk
           if-no-files-found: error
