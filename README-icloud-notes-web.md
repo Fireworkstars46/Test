@@ -12,7 +12,8 @@ Features:
 - External non-web links open in their matching Android app
 - Optimized WebView scrolling and hardware acceleration
 - Android 16 safe-area handling so the iCloud header is not hidden under the status bar
-- Fast-flick mode: quick vertical flicks cancel the slow glide and instantly jump several screen-heights
+- Speed-sensitive scrolling: slow drags stay controllable, fast drags are amplified strongly
+- Fast releases use a high-velocity native WebView fling so scrolling remains smooth instead of jumping
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
