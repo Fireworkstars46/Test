@@ -25,20 +25,15 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build unsigned release APK
-        run: gradle --no-daemon assembleRelease
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
 
-      - name: Copy unsigned release APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="$(find app/build/outputs/apk/release -type f -name '*unsigned*.apk' | head -n 1)"
-          test -f "$APK"
-          cp "$APK" iCloud-Notes-S22-v1.6-unsigned-release.apk
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk iCloud-Notes-S22.apk
 
-      - name: Upload unsigned release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: iCloud-Notes-S22-v1.6-unsigned-release
-          path: iCloud-Notes-S22-v1.6-unsigned-release.apk
+          name: iCloud-Notes-S22
+          path: iCloud-Notes-S22.apk
           if-no-files-found: error
