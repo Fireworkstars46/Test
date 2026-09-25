@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
+                // Avoid CSS smooth-scroll fighting Android's own touch/fling physics.
                 view.evaluateJavascript(
                         "(function(){"
                                 + "var id='s22-notes-scroll-tweaks';"
@@ -131,41 +132,6 @@ public class MainActivity extends Activity {
                                 + "s.textContent='html,body,*{scroll-behavior:auto!important;overscroll-behavior:none!important;}';"
                                 + "document.documentElement.appendChild(s);"
                                 + "}"
-                                + "window.__s22InstantFlick=function(dir,screens,xPx,yPx){"
-                                + "try{"
-                                + "var dpr=window.devicePixelRatio||1;"
-                                + "var x=xPx/dpr,y=yPx/dpr;"
-                                + "function scrollable(el){"
-                                + "if(!el)return false;"
-                                + "var cs=getComputedStyle(el);"
-                                + "var oy=cs.overflowY;"
-                                + "return el.scrollHeight>el.clientHeight+40 && (oy==='auto'||oy==='scroll'||oy==='overlay');"
-                                + "}"
-                                + "var el=document.elementFromPoint(x,y);"
-                                + "var p=el;"
-                                + "while(p&&p!==document.documentElement&&!scrollable(p)){p=p.parentElement;}"
-                                + "if(p&&scrollable(p)){el=p;}else{"
-                                + "var best=null,bestScore=0,all=document.querySelectorAll('*');"
-                                + "for(var i=0;i<all.length;i++){"
-                                + "var n=all[i];"
-                                + "if(!scrollable(n))continue;"
-                                + "var r=n.getBoundingClientRect();"
-                                + "if(r.height<120||r.bottom<0||r.top>innerHeight)continue;"
-                                + "var score=Math.min(r.height,innerHeight)*(n.scrollHeight-n.clientHeight);"
-                                + "if(score>bestScore){best=n;bestScore=score;}"
-                                + "}"
-                                + "el=best||(document.scrollingElement||document.documentElement);"
-                                + "}"
-                                + "var root=(document.scrollingElement||document.documentElement);"
-                                + "var isRoot=(el===root||el===document.body||el===document.documentElement);"
-                                + "var h=(isRoot?innerHeight:el.clientHeight)||innerHeight;"
-                                + "var amt=Math.round(h*screens*dir);"
-                                + "var cur=isRoot?root.scrollTop:el.scrollTop;"
-                                + "var max=(isRoot?root.scrollHeight-root.clientHeight:el.scrollHeight-el.clientHeight);"
-                                + "var next=Math.max(0,Math.min(max,cur+amt));"
-                                + "if(isRoot){root.scrollTop=next;}else{el.scrollTop=next;}"
-                                + "}catch(e){}"
-                                + "};"
                                 + "})();",
                         null
                 );
@@ -260,12 +226,23 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        private static final float FAST_FLING_THRESHOLD = 2200f;
-        private static final float MIN_FAST_SWIPE_DP = 42f;
+        // Slow finger movement stays controllable, while fast movement becomes very sensitive.
+        private static final float MIN_DRAG_MULTIPLIER = 1.35f;
+        private static final float MAX_DRAG_MULTIPLIER = 4.75f;
+        private static final float SPEED_FOR_MAX_MULTIPLIER = 2600f;
+
+        // A fast release gets a strong but still smooth WebView fling.
+        private static final float CUSTOM_FLING_THRESHOLD = 950f;
+        private static final float FLING_MULTIPLIER = 4.1f;
+        private static final int MAX_FLING_VELOCITY = 65000;
+        private static final float MIN_GESTURE_DP = 22f;
 
         private VelocityTracker velocityTracker;
-        private float downX;
-        private float downY;
+        private float rawDownX;
+        private float rawDownY;
+        private float lastRawY;
+        private float virtualY;
+        private long lastEventTime;
 
         FastWebView(Context context) {
             super(context);
@@ -273,67 +250,102 @@ public class MainActivity extends Activity {
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            int action = event.getActionMasked();
+            final int action = event.getActionMasked();
+            MotionEvent transformed = MotionEvent.obtain(event);
 
             if (action == MotionEvent.ACTION_DOWN) {
                 recycleTracker();
                 velocityTracker = VelocityTracker.obtain();
                 velocityTracker.addMovement(event);
-                downX = event.getX();
-                downY = event.getY();
-                return super.onTouchEvent(event);
+
+                rawDownX = event.getX();
+                rawDownY = event.getY();
+                lastRawY = rawDownY;
+                virtualY = rawDownY;
+                lastEventTime = event.getEventTime();
+
+                transformed.setLocation(event.getX(), virtualY);
+                boolean handled = super.onTouchEvent(transformed);
+                transformed.recycle();
+                return handled;
             }
 
             if (velocityTracker != null) {
                 velocityTracker.addMovement(event);
             }
 
+            if (action == MotionEvent.ACTION_MOVE) {
+                long now = event.getEventTime();
+                long dtMs = Math.max(1L, now - lastEventTime);
+                float rawDeltaY = event.getY() - lastRawY;
+                float instantaneousSpeed = Math.abs(rawDeltaY) * 1000f / dtMs;
+
+                float t = Math.min(1f, instantaneousSpeed / SPEED_FOR_MAX_MULTIPLIER);
+                // Ease the multiplier upward so it feels smooth rather than switching modes.
+                float eased = t * t * (3f - 2f * t);
+                float multiplier =
+                        MIN_DRAG_MULTIPLIER
+                                + (MAX_DRAG_MULTIPLIER - MIN_DRAG_MULTIPLIER) * eased;
+
+                virtualY += rawDeltaY * multiplier;
+                transformed.setLocation(event.getX(), virtualY);
+
+                lastRawY = event.getY();
+                lastEventTime = now;
+
+                boolean handled = super.onTouchEvent(transformed);
+                transformed.recycle();
+                return handled;
+            }
+
             if (action == MotionEvent.ACTION_UP && velocityTracker != null) {
                 velocityTracker.computeCurrentVelocity(1000);
 
                 float velocityY = velocityTracker.getYVelocity();
-                float dx = event.getX() - downX;
-                float dy = event.getY() - downY;
-                float minDistance = MIN_FAST_SWIPE_DP * getResources().getDisplayMetrics().density;
+                float dx = event.getX() - rawDownX;
+                float dy = event.getY() - rawDownY;
+                float minGesture =
+                        MIN_GESTURE_DP * getResources().getDisplayMetrics().density;
 
-                boolean fastVerticalFlick =
-                        Math.abs(velocityY) >= FAST_FLING_THRESHOLD
-                                && Math.abs(dy) >= minDistance
-                                && Math.abs(dy) > Math.abs(dx) * 1.15f;
+                boolean verticalGesture =
+                        Math.abs(dy) >= minGesture
+                                && Math.abs(dy) > Math.abs(dx) * 1.10f;
 
-                if (fastVerticalFlick) {
-                    MotionEvent cancel = MotionEvent.obtain(event);
-                    cancel.setAction(MotionEvent.ACTION_CANCEL);
-                    super.onTouchEvent(cancel);
-                    cancel.recycle();
+                if (verticalGesture && Math.abs(velocityY) >= CUSTOM_FLING_THRESHOLD) {
+                    // Cancel WebView's ordinary slow fling, then start a much faster native
+                    // WebView fling. flingScroll stays animated/smooth instead of jumping.
+                    transformed.setAction(MotionEvent.ACTION_CANCEL);
+                    transformed.setLocation(event.getX(), virtualY);
+                    super.onTouchEvent(transformed);
 
-                    final int direction = velocityY < 0 ? 1 : -1;
-                    final float screens = clamp(Math.abs(velocityY) / 2100f, 2.25f, 6.5f);
-                    final float x = event.getX();
-                    final float y = event.getY();
+                    int boostedVelocity = clamp(
+                            Math.round(-velocityY * FLING_MULTIPLIER),
+                            -MAX_FLING_VELOCITY,
+                            MAX_FLING_VELOCITY
+                    );
 
-                    post(() -> evaluateJavascript(
-                            "window.__s22InstantFlick&&window.__s22InstantFlick("
-                                    + direction + ","
-                                    + screens + ","
-                                    + x + ","
-                                    + y + ");",
-                            null
-                    ));
+                    post(() -> flingScroll(0, boostedVelocity));
 
+                    transformed.recycle();
                     recycleTracker();
                     return true;
                 }
 
+                transformed.setLocation(event.getX(), virtualY);
+                boolean handled = super.onTouchEvent(transformed);
+                transformed.recycle();
                 recycleTracker();
-                return super.onTouchEvent(event);
+                return handled;
             }
 
             if (action == MotionEvent.ACTION_CANCEL) {
                 recycleTracker();
             }
 
-            return super.onTouchEvent(event);
+            transformed.setLocation(event.getX(), virtualY);
+            boolean handled = super.onTouchEvent(transformed);
+            transformed.recycle();
+            return handled;
         }
 
         private void recycleTracker() {
@@ -343,7 +355,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        private static float clamp(float value, float min, float max) {
+        private static int clamp(int value, int min, int max) {
             return Math.max(min, Math.min(max, value));
         }
     }
