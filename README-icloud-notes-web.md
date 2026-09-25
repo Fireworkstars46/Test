@@ -10,5 +10,7 @@ Features:
 - Downloads to Android Downloads
 - Back button navigates WebView history
 - External non-web links open in their matching Android app
+- Optimized WebView scrolling and hardware acceleration
+- Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
