@@ -31,9 +31,28 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk iCloud-Notes-S22.apk
 
+      - name: Package Android signing tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          TOOL_DIR="$(dirname "$APKSIGNER")"
+          mkdir -p android-sign-tools/lib
+          cp "$APKSIGNER" android-sign-tools/apksigner
+          cp "$TOOL_DIR/lib/apksigner.jar" android-sign-tools/lib/apksigner.jar
+          chmod +x android-sign-tools/apksigner
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: iCloud-Notes-S22
           path: iCloud-Notes-S22.apk
+          if-no-files-found: error
+
+      - name: Upload Android signing tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-sign-tools
+          path: android-sign-tools
           if-no-files-found: error
