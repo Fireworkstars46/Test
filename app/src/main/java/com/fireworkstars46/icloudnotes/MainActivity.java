@@ -229,9 +229,9 @@ public class MainActivity extends Activity {
     private static class FastWebView extends WebView {
         // Native WebView scrolling stays untouched while the finger is down.
         // On release, only fast vertical flicks receive extra native momentum.
-        private static final float BOOST_THRESHOLD = 520f;
+        private static final float BOOST_THRESHOLD = 350f;
         private static final float MIN_VERTICAL_GESTURE_DP = 10f;
-        private static final int MAX_FLING_VELOCITY = 90000;
+        private static final int MAX_FLING_VELOCITY = 160000;
 
         private VelocityTracker velocityTracker;
         private float downX;
@@ -276,11 +276,11 @@ public class MainActivity extends Activity {
                 if (verticalGesture && Math.abs(velocityY) >= BOOST_THRESHOLD) {
                     float speed = Math.abs(velocityY);
 
-                    // Moderate swipes stay close to v1.6. Very fast swipes receive
-                    // progressively more momentum, which is closer to the native
-                    // Notes feeling without making slow scrolling uncontrollable.
-                    float normalized = Math.min(1f, Math.max(0f, (speed - BOOST_THRESHOLD) / 5200f));
-                    float multiplier = 4.8f + (2.6f * normalized);
+                    // Moderate swipes get a stronger launch than v1.8. Very fast swipes receive
+                    // progressively much more momentum while keeping the native
+                    // WebView coast/deceleration after release.
+                    float normalized = Math.min(1f, Math.max(0f, (speed - BOOST_THRESHOLD) / 3600f));
+                    float multiplier = 7.0f + (6.0f * normalized);
 
                     int boostedVelocity = clamp(
                             Math.round(-velocityY * multiplier),
