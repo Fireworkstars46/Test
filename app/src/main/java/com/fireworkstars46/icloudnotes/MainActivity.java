@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
     private static final String START_URL = "https://www.icloud.com/notes/";
     private static final int FILE_CHOOSER_REQUEST = 401;
 
-    private IOSMomentumWebView webView;
+    private FastWebView webView;
     private ValueCallback<Uri[]> fileCallback;
 
     @Override
@@ -46,13 +46,14 @@ public class MainActivity extends Activity {
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int top = insets.getSystemWindowInsetTop();
             int bottom = insets.getSystemWindowInsetBottom();
+
             if (v.getPaddingTop() != top || v.getPaddingBottom() != bottom) {
                 v.setPadding(0, top, 0, bottom);
             }
             return insets;
         });
 
-        webView = new IOSMomentumWebView(this);
+        webView = new FastWebView(this);
         webView.setBackgroundColor(Color.WHITE);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setVerticalScrollBarEnabled(false);
@@ -121,66 +122,17 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
+                // Let Android/WebView own the actual momentum physics. Only stop
+                // web-page CSS from layering another smooth-scroll animation on top.
                 view.evaluateJavascript(
                         "(function(){"
-                                + "var styleId='s22-notes-scroll-tweaks';"
-                                + "if(!document.getElementById(styleId)){"
+                                + "var id='s22-notes-scroll-tweaks';"
+                                + "if(!document.getElementById(id)){"
                                 + "var st=document.createElement('style');"
-                                + "st.id=styleId;"
+                                + "st.id=id;"
                                 + "st.textContent='html,body,*{scroll-behavior:auto!important;}';"
                                 + "document.documentElement.appendChild(st);"
                                 + "}"
-                                + "window.__s22MomentumRAF=0;"
-                                + "window.__s22StopIOSMomentum=function(){"
-                                + "if(window.__s22MomentumRAF){cancelAnimationFrame(window.__s22MomentumRAF);window.__s22MomentumRAF=0;}"
-                                + "};"
-                                + "window.__s22FindScrollable=function(x,y){"
-                                + "function ok(el){"
-                                + "if(!el||!el.getBoundingClientRect)return false;"
-                                + "var cs=getComputedStyle(el), oy=cs.overflowY;"
-                                + "return el.scrollHeight>el.clientHeight+24 && (oy==='auto'||oy==='scroll'||oy==='overlay');"
-                                + "}"
-                                + "var el=document.elementFromPoint(x,y), p=el;"
-                                + "while(p&&p!==document.documentElement){if(ok(p))return p;p=p.parentElement;}"
-                                + "var root=document.scrollingElement||document.documentElement;"
-                                + "if(root.scrollHeight>root.clientHeight+24)return root;"
-                                + "var all=document.querySelectorAll('*'),best=null,bestScore=0;"
-                                + "for(var i=0;i<all.length;i++){"
-                                + "var n=all[i];if(!ok(n))continue;"
-                                + "var r=n.getBoundingClientRect();"
-                                + "if(r.bottom<0||r.top>innerHeight||r.height<120)continue;"
-                                + "var score=Math.min(r.height,innerHeight)*(n.scrollHeight-n.clientHeight);"
-                                + "if(score>bestScore){best=n;bestScore=score;}"
-                                + "}"
-                                + "return best||root;"
-                                + "};"
-                                + "window.__s22StartIOSMomentum=function(vy,xPx,yPx){"
-                                + "window.__s22StopIOSMomentum();"
-                                + "var dpr=window.devicePixelRatio||1;"
-                                + "var x=xPx/dpr,y=yPx/dpr;"
-                                + "var el=window.__s22FindScrollable(x,y);"
-                                + "if(!el)return;"
-                                + "var root=document.scrollingElement||document.documentElement;"
-                                + "var isRoot=(el===root||el===document.body||el===document.documentElement);"
-                                + "var velocity=(-vy/dpr);"
-                                + "var decay=0.9978;"
-                                + "var last=performance.now();"
-                                + "function getTop(){return isRoot?root.scrollTop:el.scrollTop;}"
-                                + "function setTop(v){if(isRoot){root.scrollTop=v;}else{el.scrollTop=v;}}"
-                                + "function maxTop(){return Math.max(0,(isRoot?root.scrollHeight-root.clientHeight:el.scrollHeight-el.clientHeight));}"
-                                + "function step(now){"
-                                + "var dt=Math.max(1,Math.min(34,now-last));last=now;"
-                                + "if(Math.abs(velocity)<6){window.__s22MomentumRAF=0;return;}"
-                                + "var old=getTop();"
-                                + "var next=Math.max(0,Math.min(maxTop(),old+velocity*dt/1000));"
-                                + "setTop(next);"
-                                + "var actual=getTop();"
-                                + "if(Math.abs(actual-old)<0.05&&(next<=0||next>=maxTop())){window.__s22MomentumRAF=0;return;}"
-                                + "velocity*=Math.pow(decay,dt);"
-                                + "window.__s22MomentumRAF=requestAnimationFrame(step);"
-                                + "}"
-                                + "window.__s22MomentumRAF=requestAnimationFrame(step);"
-                                + "};"
                                 + "})();",
                         null
                 );
@@ -274,15 +226,18 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static class IOSMomentumWebView extends WebView {
-        private static final float MOMENTUM_THRESHOLD = 420f;
+    private static class FastWebView extends WebView {
+        // Native WebView scrolling stays untouched while the finger is down.
+        // On release, only fast vertical flicks receive extra native momentum.
+        private static final float BOOST_THRESHOLD = 520f;
         private static final float MIN_VERTICAL_GESTURE_DP = 10f;
+        private static final int MAX_FLING_VELOCITY = 90000;
 
         private VelocityTracker velocityTracker;
         private float downX;
         private float downY;
 
-        IOSMomentumWebView(Context context) {
+        FastWebView(Context context) {
             super(context);
         }
 
@@ -291,10 +246,6 @@ public class MainActivity extends Activity {
             int action = event.getActionMasked();
 
             if (action == MotionEvent.ACTION_DOWN) {
-                evaluateJavascript(
-                        "window.__s22StopIOSMomentum&&window.__s22StopIOSMomentum();",
-                        null
-                );
                 recycleTracker();
                 velocityTracker = VelocityTracker.obtain();
                 downX = event.getX();
@@ -318,28 +269,30 @@ public class MainActivity extends Activity {
                         Math.abs(dy) >= minDistance
                                 && Math.abs(dy) > Math.abs(dx) * 1.05f;
 
-                if (verticalGesture && Math.abs(velocityY) >= MOMENTUM_THRESHOLD) {
-                    // Keep the normal 1:1 drag that already happened, but prevent
-                    // WebView's Android fling from starting. The page then gets the
-                    // iPhone-style momentum curve measured from the reference video.
-                    MotionEvent cancel = MotionEvent.obtain(event);
-                    cancel.setAction(MotionEvent.ACTION_CANCEL);
-                    super.onTouchEvent(cancel);
-                    cancel.recycle();
+                // Give WebView the real ACTION_UP first. That preserves its normal
+                // smooth drag/release behavior and lets a tap during momentum stop it.
+                boolean handled = super.onTouchEvent(event);
 
-                    float x = event.getX();
-                    float y = event.getY();
-                    evaluateJavascript(
-                            "window.__s22StartIOSMomentum&&window.__s22StartIOSMomentum("
-                                    + velocityY + "," + x + "," + y + ");",
-                            null
+                if (verticalGesture && Math.abs(velocityY) >= BOOST_THRESHOLD) {
+                    float speed = Math.abs(velocityY);
+
+                    // Moderate swipes stay close to v1.6. Very fast swipes receive
+                    // progressively more momentum, which is closer to the native
+                    // Notes feeling without making slow scrolling uncontrollable.
+                    float normalized = Math.min(1f, Math.max(0f, (speed - BOOST_THRESHOLD) / 5200f));
+                    float multiplier = 4.8f + (2.6f * normalized);
+
+                    int boostedVelocity = clamp(
+                            Math.round(-velocityY * multiplier),
+                            -MAX_FLING_VELOCITY,
+                            MAX_FLING_VELOCITY
                     );
 
-                    recycleTracker();
-                    return true;
+                    // Use WebView's own animated fling/deceleration rather than
+                    // scripted jumps. A tiny delay lets the original release settle.
+                    postDelayed(() -> flingScroll(0, boostedVelocity), 8);
                 }
 
-                boolean handled = super.onTouchEvent(event);
                 recycleTracker();
                 return handled;
             }
@@ -356,6 +309,10 @@ public class MainActivity extends Activity {
                 velocityTracker.recycle();
                 velocityTracker = null;
             }
+        }
+
+        private static int clamp(int value, int min, int max) {
+            return Math.max(min, Math.min(max, value));
         }
     }
 }
