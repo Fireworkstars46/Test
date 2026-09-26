@@ -1,0 +1,42 @@
+name: Build iCloud Notes APK
+
+on:
+  push:
+    branches:
+      - apple-notes-webapp-build
+    paths-ignore:
+      - 'build-output/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Save APK into branch
+        run: |
+          mkdir -p build-output
+          cp app/build/outputs/apk/debug/app-debug.apk build-output/iCloud-Notes-S22.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-output/iCloud-Notes-S22.apk
+          git commit -m "Build iCloud Notes S22 APK" || exit 0
+          git push

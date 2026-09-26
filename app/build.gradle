@@ -1,0 +1,18 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.fireworkstars46.icloudnotes'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.fireworkstars46.icloudnotes"
+        minSdk 26
+        targetSdk 35
+        versionCode 9
+        versionName "1.8"
+    }
+}
+
+dependencies { }
