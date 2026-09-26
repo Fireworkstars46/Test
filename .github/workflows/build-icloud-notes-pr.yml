@@ -25,31 +25,15 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build unsigned release APK
-        run: gradle --no-daemon assembleRelease
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release-unsigned.apk iCloud-Notes-S22-v1.8-unsigned-release.apk
-
-      - name: Collect Android APK signer
-        shell: bash
-        run: |
-          set -euo pipefail
-          TOOLS_DIR="$ANDROID_HOME/build-tools/35.0.0"
-          mkdir -p android-apksigner/lib
-          cp "$TOOLS_DIR/apksigner" android-apksigner/apksigner
-          cp "$TOOLS_DIR/lib/apksigner.jar" android-apksigner/lib/apksigner.jar
+        run: cp app/build/outputs/apk/debug/app-debug.apk iCloud-Notes-S22.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: iCloud-Notes-S22-v1.8-unsigned-release
-          path: iCloud-Notes-S22-v1.8-unsigned-release.apk
-          if-no-files-found: error
-
-      - name: Upload APK signer
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apksigner-tool
-          path: android-apksigner
+          name: iCloud-Notes-S22
+          path: iCloud-Notes-S22.apk
           if-no-files-found: error
