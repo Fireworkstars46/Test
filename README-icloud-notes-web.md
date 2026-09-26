@@ -12,9 +12,9 @@ Features:
 - External non-web links open in their matching Android app
 - Optimized WebView scrolling and hardware acceleration
 - Android 16 safe-area handling so the iCloud header is not hidden under the status bar
-- Native 1:1 finger tracking
-- iPhone-style momentum curve measured from an Apple Notes screen recording
-- Momentum decays at approximately 0.9978 per millisecond and stops immediately when touched again
+- Native 1:1 finger tracking while touching the screen
+- Native WebView momentum after release so scrolling keeps moving and gradually slows down
+- Adaptive fast-swipe boost: moderate swipes stay controlled, very fast swipes receive substantially more momentum
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
