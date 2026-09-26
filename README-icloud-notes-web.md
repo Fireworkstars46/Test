@@ -15,6 +15,7 @@ Features:
 - Native 1:1 finger tracking while touching the screen
 - Native WebView momentum after release so scrolling keeps moving and gradually slows down
 - Adaptive fast-swipe boost: moderate swipes stay controlled, very fast swipes receive substantially more momentum
+- v1.8 returns to the native WebView momentum approach used by the better-feeling v1.6 build
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
