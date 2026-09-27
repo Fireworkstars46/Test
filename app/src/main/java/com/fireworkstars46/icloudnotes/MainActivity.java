@@ -274,8 +274,9 @@ public class MainActivity extends Activity {
         help.setTextSize(14f);
         help.setTextColor(Color.rgb(85, 85, 85));
         help.setText(
-                "Gentle scrolling stays true slow/1:1. Medium movement starts to accelerate, "
-                        + "and only fast swipes ramp strongly toward the maximum below."
+                "Scroll speed now changes continuously with your finger speed. Gentle movement "
+                        + "stays near 1:1, and every increase in swipe speed gradually raises "
+                        + "the multiplier toward the maximum below."
         );
         help.setPadding(0, 0, 0, dp(12));
 
@@ -427,10 +428,13 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        // v2.3: a real slow-scroll zone. Gentle movement is never boosted.
-        // Only medium/fast movement enters the acceleration curve.
-        private static final float SPEED_START = 900f;
-        private static final float SPEED_FOR_MAX = 3200f;
+        // v2.4: one continuous percentage-based curve with no speed thresholds.
+        // 0% finger speed starts at the slow multiplier and every increase in
+        // detected speed increases the multiplier smoothly toward the selected max.
+        private static final float SPEED_FOR_MAX = 4200f;
+        private static final float CURVE_POWER = 4.0f;
+        private static final float SPEED_FILTER_MS = 70f;
+        private static final float MULTIPLIER_FILTER_MS = 45f;
 
         private final int touchSlop;
         private final SharedPreferences preferences;
@@ -510,33 +514,33 @@ public class MainActivity extends Activity {
                 if (verticalScroll) {
                     float instantaneousSpeed = Math.abs(rawDeltaY) * 1000f / dtMs;
 
-                    // Light filtering prevents one noisy touch sample from causing
-                    // a huge speed spike when the maximum is set very high.
-                    smoothedSpeed =
-                            (smoothedSpeed * 0.55f)
-                                    + (instantaneousSpeed * 0.45f);
+                    // Time-based smoothing makes the detected finger speed stable
+                    // regardless of how often Android sends touch samples.
+                    float speedAlpha =
+                            1f - (float) Math.exp(-dtMs / SPEED_FILTER_MS);
+                    smoothedSpeed +=
+                            (instantaneousSpeed - smoothedSpeed) * speedAlpha;
+
+                    // Convert actual finger speed to a continuous 0..100% value.
+                    // There is no threshold: even a 1% increase in speed changes
+                    // the target multiplier by a correspondingly tiny amount.
+                    float speedPercent = clamp01(smoothedSpeed / SPEED_FOR_MAX);
+
+                    // A smooth power curve keeps low-speed dragging precise while
+                    // still allowing very fast swipes to reach large multipliers.
+                    float curve =
+                            (float) Math.pow(speedPercent, CURVE_POWER);
 
                     float low = slowMultiplier();
+                    float high = maxMultiplierTenths / 10f;
+                    float target = low + ((high - low) * curve);
 
-                    if (smoothedSpeed <= SPEED_START) {
-                        // Hard slow zone: no boost at all for a gentle drag.
-                        lastMultiplier = low;
-                    } else {
-                        float t = clamp01(
-                                (smoothedSpeed - SPEED_START)
-                                        / (SPEED_FOR_MAX - SPEED_START)
-                        );
-
-                        // Quintic response keeps low/medium motion close to 1x,
-                        // then rises very aggressively only on genuinely fast swipes.
-                        float t2 = t * t;
-                        float curve = t2 * t2 * t; // t^5
-                        float high = maxMultiplierTenths / 10f;
-                        float target = low + ((high - low) * curve);
-
-                        // Smooth the multiplier so the transition never snaps.
-                        lastMultiplier += (target - lastMultiplier) * 0.50f;
-                    }
+                    // Smooth acceleration/deceleration of the multiplier itself so
+                    // changing finger speed never produces a visible step or snap.
+                    float multiplierAlpha =
+                            1f - (float) Math.exp(-dtMs / MULTIPLIER_FILTER_MS);
+                    lastMultiplier +=
+                            (target - lastMultiplier) * multiplierAlpha;
                 } else {
                     lastMultiplier = slowMultiplier();
                 }
