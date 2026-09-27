@@ -25,6 +25,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
@@ -36,11 +37,12 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 401;
 
     private static final String PREFS_NAME = "icloud_notes_preferences";
-    private static final String KEY_SCROLL_SPEED = "fast_scroll_multiplier";
-    private static final float DEFAULT_SCROLL_SPEED = 5.5f;
-    private static final float MIN_SCROLL_SPEED = 1.0f;
-    private static final float MAX_SCROLL_SPEED = 12.0f;
-    private static final float SCROLL_SPEED_STEP = 0.5f;
+    private static final String OLD_KEY_SCROLL_SPEED = "fast_scroll_multiplier";
+    private static final String KEY_SCROLL_TENTHS = "fast_scroll_multiplier_tenths";
+
+    private static final int DEFAULT_SCROLL_TENTHS = 55; // 5.5x
+    private static final int MIN_SCROLL_TENTHS = 1;     // 0.1x
+    private static final int MAX_SCROLL_TENTHS = 1000;  // 100.0x
 
     private FastWebView webView;
     private ValueCallback<Uri[]> fileCallback;
@@ -67,6 +69,36 @@ public class MainActivity extends Activity {
             return insets;
         });
 
+        LinearLayout appColumn = new LinearLayout(this);
+        appColumn.setOrientation(LinearLayout.VERTICAL);
+        appColumn.setBackgroundColor(Color.WHITE);
+
+        LinearLayout settingsStrip = new LinearLayout(this);
+        settingsStrip.setOrientation(LinearLayout.HORIZONTAL);
+        settingsStrip.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        settingsStrip.setPadding(dp(4), 0, dp(7), 0);
+        settingsStrip.setBackgroundColor(Color.rgb(250, 250, 250));
+
+        TextView settingsButton = new TextView(this);
+        settingsButton.setText("⚙");
+        settingsButton.setTextSize(19f);
+        settingsButton.setTextColor(Color.rgb(75, 75, 75));
+        settingsButton.setGravity(Gravity.CENTER);
+        settingsButton.setContentDescription("Scroll settings");
+        settingsButton.setBackground(makeRoundedBackground(
+                Color.rgb(245, 245, 245),
+                Color.rgb(205, 205, 205),
+                14
+        ));
+        settingsButton.setOnClickListener(v -> showScrollSettings());
+
+        LinearLayout.LayoutParams settingsButtonParams =
+                new LinearLayout.LayoutParams(dp(38), dp(26));
+        settingsStrip.addView(settingsButton, settingsButtonParams);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(225, 225, 225));
+
         webView = new FastWebView(this);
         webView.setBackgroundColor(Color.WHITE);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -75,34 +107,36 @@ public class MainActivity extends Activity {
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
 
-        root.addView(
+        appColumn.addView(
+                settingsStrip,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(30)
+                )
+        );
+        appColumn.addView(
+                divider,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(1)
+                )
+        );
+        appColumn.addView(
                 webView,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1f
+                )
+        );
+
+        root.addView(
+                appColumn,
                 new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                 )
         );
-
-        TextView settingsButton = new TextView(this);
-        settingsButton.setText("⚙");
-        settingsButton.setTextSize(21f);
-        settingsButton.setTextColor(Color.rgb(70, 70, 70));
-        settingsButton.setGravity(Gravity.CENTER);
-        settingsButton.setContentDescription("Scroll settings");
-        settingsButton.setAlpha(0.72f);
-        settingsButton.setElevation(dp(5));
-
-        GradientDrawable gearBackground = new GradientDrawable();
-        gearBackground.setShape(GradientDrawable.OVAL);
-        gearBackground.setColor(Color.argb(235, 255, 255, 255));
-        gearBackground.setStroke(dp(1), Color.argb(130, 150, 150, 150));
-        settingsButton.setBackground(gearBackground);
-        settingsButton.setOnClickListener(v -> showScrollSettings());
-
-        FrameLayout.LayoutParams gearParams = new FrameLayout.LayoutParams(dp(42), dp(42));
-        gearParams.gravity = Gravity.END | Gravity.BOTTOM;
-        gearParams.setMargins(dp(8), dp(8), dp(12), dp(12));
-        root.addView(settingsButton, gearParams);
 
         setContentView(root);
         root.requestApplyInsets();
@@ -234,33 +268,58 @@ public class MainActivity extends Activity {
     private void showScrollSettings() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(22), dp(8), dp(22), dp(4));
-
-        TextView valueLabel = new TextView(this);
-        valueLabel.setTextSize(18f);
-        valueLabel.setTextColor(Color.rgb(45, 45, 45));
-        valueLabel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(dp(20), dp(8), dp(20), dp(5));
 
         TextView help = new TextView(this);
         help.setTextSize(14f);
-        help.setTextColor(Color.rgb(95, 95, 95));
-        help.setText("Higher values make quick swipes move farther and faster. Slow movement stays close to normal. v2.0 used 5.5×.");
-        help.setPadding(0, dp(8), 0, dp(10));
+        help.setTextColor(Color.rgb(85, 85, 85));
+        help.setText(
+                "Slow finger movement stays slow. The faster you swipe, the more the app "
+                        + "ramps toward the maximum below."
+        );
+        help.setPadding(0, 0, 0, dp(12));
+
+        LinearLayout stepRow = new LinearLayout(this);
+        stepRow.setOrientation(LinearLayout.HORIZONTAL);
+        stepRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button minus = new Button(this);
+        minus.setText("−");
+        minus.setTextSize(22f);
+        minus.setMinWidth(0);
+        minus.setMinimumWidth(0);
+
+        TextView valueLabel = new TextView(this);
+        valueLabel.setTextSize(19f);
+        valueLabel.setTextColor(Color.rgb(40, 40, 40));
+        valueLabel.setGravity(Gravity.CENTER);
+
+        Button plus = new Button(this);
+        plus.setText("+");
+        plus.setTextSize(20f);
+        plus.setMinWidth(0);
+        plus.setMinimumWidth(0);
+
+        stepRow.addView(minus, new LinearLayout.LayoutParams(dp(58), dp(48)));
+        stepRow.addView(
+                valueLabel,
+                new LinearLayout.LayoutParams(0, dp(48), 1f)
+        );
+        stepRow.addView(plus, new LinearLayout.LayoutParams(dp(58), dp(48)));
 
         SeekBar slider = new SeekBar(this);
-        int steps = Math.round((MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP);
-        slider.setMax(steps);
+        slider.setMax(MAX_SCROLL_TENTHS - MIN_SCROLL_TENTHS);
 
-        float current = webView.getMaxMultiplier();
-        slider.setProgress(Math.round((current - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP));
-        updateSpeedLabel(valueLabel, current);
+        int currentTenths = webView.getMaxMultiplierTenths();
+        slider.setProgress(currentTenths - MIN_SCROLL_TENTHS);
+        updateSpeedLabel(valueLabel, currentTenths);
 
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                float value = MIN_SCROLL_SPEED + (progress * SCROLL_SPEED_STEP);
-                webView.setMaxMultiplier(value);
-                updateSpeedLabel(valueLabel, value);
+                int tenths = MIN_SCROLL_TENTHS + progress;
+                webView.setMaxMultiplierTenths(tenths);
+                updateSpeedLabel(valueLabel, tenths);
             }
 
             @Override
@@ -270,30 +329,68 @@ public class MainActivity extends Activity {
             public void onStopTrackingTouch(SeekBar seekBar) { }
         });
 
-        panel.addView(valueLabel);
+        minus.setOnClickListener(v -> {
+            int next = Math.max(
+                    MIN_SCROLL_TENTHS,
+                    webView.getMaxMultiplierTenths() - 1
+            );
+            webView.setMaxMultiplierTenths(next);
+            slider.setProgress(next - MIN_SCROLL_TENTHS);
+            updateSpeedLabel(valueLabel, next);
+        });
+
+        plus.setOnClickListener(v -> {
+            int next = Math.min(
+                    MAX_SCROLL_TENTHS,
+                    webView.getMaxMultiplierTenths() + 1
+            );
+            webView.setMaxMultiplierTenths(next);
+            slider.setProgress(next - MIN_SCROLL_TENTHS);
+            updateSpeedLabel(valueLabel, next);
+        });
+
+        TextView range = new TextView(this);
+        range.setTextSize(12f);
+        range.setTextColor(Color.rgb(110, 110, 110));
+        range.setText("0.1×                                                           100.0×");
+        range.setPadding(0, 0, 0, dp(2));
+
         panel.addView(help);
+        panel.addView(stepRow);
         panel.addView(slider);
+        panel.addView(range);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Scroll sensitivity")
                 .setView(panel)
                 .setPositiveButton("Done", null)
-                .setNegativeButton("Reset to 5.5×", null)
+                .setNeutralButton("Reset to 5.5×", null)
                 .create();
 
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
-            webView.setMaxMultiplier(DEFAULT_SCROLL_SPEED);
-            slider.setProgress(Math.round(
-                    (DEFAULT_SCROLL_SPEED - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP
-            ));
-            updateSpeedLabel(valueLabel, DEFAULT_SCROLL_SPEED);
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            webView.setMaxMultiplierTenths(DEFAULT_SCROLL_TENTHS);
+            slider.setProgress(DEFAULT_SCROLL_TENTHS - MIN_SCROLL_TENTHS);
+            updateSpeedLabel(valueLabel, DEFAULT_SCROLL_TENTHS);
         }));
 
         dialog.show();
     }
 
-    private void updateSpeedLabel(TextView label, float value) {
-        label.setText(String.format(java.util.Locale.US, "Fast scroll speed: %.1f×", value));
+    private void updateSpeedLabel(TextView label, int tenths) {
+        label.setText(String.format(
+                java.util.Locale.US,
+                "%.1f×",
+                tenths / 10f
+        ));
+    }
+
+    private GradientDrawable makeRoundedBackground(int fill, int stroke, int radiusDp) {
+        GradientDrawable background = new GradientDrawable();
+        background.setShape(GradientDrawable.RECTANGLE);
+        background.setCornerRadius(dp(radiusDp));
+        background.setColor(fill);
+        background.setStroke(dp(1), stroke);
+        return background;
     }
 
     private int dp(int value) {
@@ -330,40 +427,53 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        private static final float MIN_MULTIPLIER = 1.0f;
-        private static final float SPEED_START = 140f;
-        private static final float SPEED_FOR_MAX = 1900f;
+        // Slow gestures stay at (or below) 1x. Faster gestures ramp progressively
+        // toward the user's selected maximum. Cubic ramp keeps slow movement precise
+        // even when the maximum is extremely high, such as 100x.
+        private static final float SPEED_START = 100f;
+        private static final float SPEED_FOR_MAX = 2800f;
 
         private final int touchSlop;
         private final SharedPreferences preferences;
 
-        private float maxMultiplier;
+        private int maxMultiplierTenths;
         private float downX;
         private float downY;
         private float lastRawY;
         private float virtualY;
         private long lastEventTime;
         private boolean verticalScroll;
-        private float lastMultiplier = 1.0f;
+        private float smoothedSpeed;
+        private float lastMultiplier;
 
         FastWebView(Context context) {
             super(context);
             touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
             preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            maxMultiplier = clamp(
-                    preferences.getFloat(KEY_SCROLL_SPEED, DEFAULT_SCROLL_SPEED),
-                    MIN_SCROLL_SPEED,
-                    MAX_SCROLL_SPEED
-            );
+
+            if (preferences.contains(KEY_SCROLL_TENTHS)) {
+                maxMultiplierTenths = clampTenths(
+                        preferences.getInt(KEY_SCROLL_TENTHS, DEFAULT_SCROLL_TENTHS)
+                );
+            } else {
+                float previous = preferences.getFloat(
+                        OLD_KEY_SCROLL_SPEED,
+                        DEFAULT_SCROLL_TENTHS / 10f
+                );
+                maxMultiplierTenths = clampTenths(Math.round(previous * 10f));
+                preferences.edit().putInt(KEY_SCROLL_TENTHS, maxMultiplierTenths).apply();
+            }
+
+            resetGestureValues();
         }
 
-        float getMaxMultiplier() {
-            return maxMultiplier;
+        int getMaxMultiplierTenths() {
+            return maxMultiplierTenths;
         }
 
-        void setMaxMultiplier(float value) {
-            maxMultiplier = clamp(value, MIN_SCROLL_SPEED, MAX_SCROLL_SPEED);
-            preferences.edit().putFloat(KEY_SCROLL_SPEED, maxMultiplier).apply();
+        void setMaxMultiplierTenths(int tenths) {
+            maxMultiplierTenths = clampTenths(tenths);
+            preferences.edit().putInt(KEY_SCROLL_TENTHS, maxMultiplierTenths).apply();
         }
 
         @Override
@@ -377,7 +487,8 @@ public class MainActivity extends Activity {
                 virtualY = downY;
                 lastEventTime = event.getEventTime();
                 verticalScroll = false;
-                lastMultiplier = 1.0f;
+                smoothedSpeed = 0f;
+                lastMultiplier = slowMultiplier();
                 return super.onTouchEvent(event);
             }
 
@@ -398,14 +509,30 @@ public class MainActivity extends Activity {
                 long dtMs = Math.max(1L, now - lastEventTime);
 
                 if (verticalScroll) {
-                    float speed = Math.abs(rawDeltaY) * 1000f / dtMs;
-                    float t = clamp01((speed - SPEED_START) / (SPEED_FOR_MAX - SPEED_START));
-                    float eased = t * t * (3f - 2f * t);
-                    lastMultiplier =
-                            MIN_MULTIPLIER
-                                    + (maxMultiplier - MIN_MULTIPLIER) * eased;
+                    float instantaneousSpeed = Math.abs(rawDeltaY) * 1000f / dtMs;
+
+                    // Light filtering prevents one noisy touch sample from causing
+                    // a huge speed spike when the maximum is set very high.
+                    smoothedSpeed =
+                            (smoothedSpeed * 0.55f)
+                                    + (instantaneousSpeed * 0.45f);
+
+                    float t = clamp01(
+                            (smoothedSpeed - SPEED_START)
+                                    / (SPEED_FOR_MAX - SPEED_START)
+                    );
+
+                    // Cubic response: slow stays slow, medium grows gradually,
+                    // and genuinely fast swipes can reach the selected maximum.
+                    float curve = t * t * t;
+                    float low = slowMultiplier();
+                    float high = maxMultiplierTenths / 10f;
+                    float target = low + ((high - low) * curve);
+
+                    // Smooth the multiplier itself so acceleration is continuous.
+                    lastMultiplier += (target - lastMultiplier) * 0.60f;
                 } else {
-                    lastMultiplier = 1.0f;
+                    lastMultiplier = slowMultiplier();
                 }
 
                 virtualY += rawDeltaY * lastMultiplier;
@@ -426,6 +553,8 @@ public class MainActivity extends Activity {
                     transformed.setLocation(event.getX(), virtualY);
                 }
 
+                // WebView receives the accelerated gesture and still performs its
+                // own native momentum/coasting after the finger is released.
                 boolean handled = super.onTouchEvent(transformed);
                 transformed.recycle();
                 return handled;
@@ -440,12 +569,23 @@ public class MainActivity extends Activity {
             return handled;
         }
 
+        private float slowMultiplier() {
+            // When the selected maximum is below 1x, the entire gesture is reduced.
+            // Otherwise slow movement remains true 1:1.
+            return Math.min(1.0f, maxMultiplierTenths / 10f);
+        }
+
+        private void resetGestureValues() {
+            smoothedSpeed = 0f;
+            lastMultiplier = slowMultiplier();
+        }
+
         private static float clamp01(float value) {
             return Math.max(0f, Math.min(1f, value));
         }
 
-        private static float clamp(float value, float min, float max) {
-            return Math.max(min, Math.min(max, value));
+        private static int clampTenths(int value) {
+            return Math.max(MIN_SCROLL_TENTHS, Math.min(MAX_SCROLL_TENTHS, value));
         }
     }
 }
