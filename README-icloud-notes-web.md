@@ -16,7 +16,8 @@ Features:
 - v2.0 accelerates the actual touch coordinates WebView receives instead of adding a second fling afterward
 - v2.1 adds a saved in-app scroll sensitivity setting
 - v2.2 expands the setting to 0.1x-100.0x in 0.1x steps, adds +/- controls, and moves settings into a non-overlay top strip
-- v2.3 adds a hard slow-scroll zone: gentle drags stay true 1:1, medium motion accelerates gradually, and only fast swipes ramp strongly toward the selected maximum
+- v2.3 adds a hard slow-scroll zone
+- v2.4 replaces the speed zones with one fully continuous percentage-based curve: every increase in finger speed smoothly increases scroll speed, with time-based smoothing to prevent jumps
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
