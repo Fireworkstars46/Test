@@ -14,7 +14,8 @@ Features:
 - Android 16 safe-area handling so the iCloud header is not hidden under the status bar
 - Native WebView momentum after release so scrolling keeps moving and gradually slows down
 - v2.0 accelerates the actual touch coordinates WebView receives instead of adding a second fling afterward
-- Slow movement stays near 1x while fast vertical finger movement ramps up to about 5.5x before WebView calculates its own native coast
+- v2.1 adds a saved in-app scroll sensitivity setting with a 1.0x to 12.0x fast-scroll slider
+- The default is 5.5x, matching v2.0, and the chosen value persists after reopening the app
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
