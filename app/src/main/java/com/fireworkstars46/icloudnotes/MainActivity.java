@@ -10,8 +10,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.MotionEvent;
-import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
@@ -227,92 +227,108 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        // Native WebView scrolling stays untouched while the finger is down.
-        // On release, only fast vertical flicks receive extra native momentum.
-        private static final float BOOST_THRESHOLD = 350f;
-        private static final float MIN_VERTICAL_GESTURE_DP = 10f;
-        private static final int MAX_FLING_VELOCITY = 160000;
+        // v2.0 changes the actual touch stream that WebView receives instead
+        // of trying to add a separate fling afterward. This lets Chromium's
+        // own nested iCloud Notes scroller calculate the higher release speed.
+        private static final float MIN_MULTIPLIER = 1.0f;
+        private static final float MAX_MULTIPLIER = 5.5f;
+        private static final float SPEED_START = 140f;
+        private static final float SPEED_FOR_MAX = 1900f;
 
-        private VelocityTracker velocityTracker;
+        private final int touchSlop;
         private float downX;
         private float downY;
+        private float lastRawY;
+        private float virtualY;
+        private long lastEventTime;
+        private boolean verticalScroll;
+        private float lastMultiplier = 1.0f;
 
         FastWebView(Context context) {
             super(context);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            int action = event.getActionMasked();
+            final int action = event.getActionMasked();
 
             if (action == MotionEvent.ACTION_DOWN) {
-                recycleTracker();
-                velocityTracker = VelocityTracker.obtain();
                 downX = event.getX();
                 downY = event.getY();
+                lastRawY = downY;
+                virtualY = downY;
+                lastEventTime = event.getEventTime();
+                verticalScroll = false;
+                lastMultiplier = 1.0f;
+                return super.onTouchEvent(event);
             }
 
-            if (velocityTracker != null) {
-                velocityTracker.addMovement(event);
-            }
+            MotionEvent transformed = MotionEvent.obtain(event);
 
-            if (action == MotionEvent.ACTION_UP && velocityTracker != null) {
-                velocityTracker.computeCurrentVelocity(1000);
+            if (action == MotionEvent.ACTION_MOVE) {
+                float totalDx = event.getX() - downX;
+                float totalDy = event.getY() - downY;
 
-                float velocityY = velocityTracker.getYVelocity();
-                float dx = event.getX() - downX;
-                float dy = event.getY() - downY;
-                float minDistance =
-                        MIN_VERTICAL_GESTURE_DP * getResources().getDisplayMetrics().density;
-
-                boolean verticalGesture =
-                        Math.abs(dy) >= minDistance
-                                && Math.abs(dy) > Math.abs(dx) * 1.05f;
-
-                // Give WebView the real ACTION_UP first. That preserves its normal
-                // smooth drag/release behavior and lets a tap during momentum stop it.
-                boolean handled = super.onTouchEvent(event);
-
-                if (verticalGesture && Math.abs(velocityY) >= BOOST_THRESHOLD) {
-                    float speed = Math.abs(velocityY);
-
-                    // Moderate swipes get a stronger launch than v1.8. Very fast swipes receive
-                    // progressively much more momentum while keeping the native
-                    // WebView coast/deceleration after release.
-                    float normalized = Math.min(1f, Math.max(0f, (speed - BOOST_THRESHOLD) / 3600f));
-                    float multiplier = 7.0f + (6.0f * normalized);
-
-                    int boostedVelocity = clamp(
-                            Math.round(-velocityY * multiplier),
-                            -MAX_FLING_VELOCITY,
-                            MAX_FLING_VELOCITY
-                    );
-
-                    // Use WebView's own animated fling/deceleration rather than
-                    // scripted jumps. A tiny delay lets the original release settle.
-                    postDelayed(() -> flingScroll(0, boostedVelocity), 8);
+                if (!verticalScroll
+                        && Math.abs(totalDy) >= touchSlop
+                        && Math.abs(totalDy) > Math.abs(totalDx) * 1.08f) {
+                    verticalScroll = true;
                 }
 
-                recycleTracker();
+                float rawDeltaY = event.getY() - lastRawY;
+                long now = event.getEventTime();
+                long dtMs = Math.max(1L, now - lastEventTime);
+
+                if (verticalScroll) {
+                    float speed = Math.abs(rawDeltaY) * 1000f / dtMs;
+                    float t = clamp01((speed - SPEED_START) / (SPEED_FOR_MAX - SPEED_START));
+                    float eased = t * t * (3f - 2f * t);
+                    lastMultiplier =
+                            MIN_MULTIPLIER
+                                    + (MAX_MULTIPLIER - MIN_MULTIPLIER) * eased;
+                } else {
+                    lastMultiplier = 1.0f;
+                }
+
+                virtualY += rawDeltaY * lastMultiplier;
+                transformed.setLocation(event.getX(), virtualY);
+
+                lastRawY = event.getY();
+                lastEventTime = now;
+
+                boolean handled = super.onTouchEvent(transformed);
+                transformed.recycle();
                 return handled;
             }
 
-            if (action == MotionEvent.ACTION_CANCEL) {
-                recycleTracker();
+            if (action == MotionEvent.ACTION_UP) {
+                if (verticalScroll) {
+                    float rawDeltaY = event.getY() - lastRawY;
+                    virtualY += rawDeltaY * lastMultiplier;
+                    transformed.setLocation(event.getX(), virtualY);
+                }
+
+                // Crucially, this ACTION_UP goes through WebView normally. Because
+                // the preceding MOVE events carried the amplified coordinates,
+                // WebView/Chromium sees a genuinely faster gesture and creates its
+                // own smooth coast/deceleration on the correct inner scroll area.
+                boolean handled = super.onTouchEvent(transformed);
+                transformed.recycle();
+                return handled;
             }
 
-            return super.onTouchEvent(event);
-        }
-
-        private void recycleTracker() {
-            if (velocityTracker != null) {
-                velocityTracker.recycle();
-                velocityTracker = null;
+            if (action == MotionEvent.ACTION_CANCEL && verticalScroll) {
+                transformed.setLocation(event.getX(), virtualY);
             }
+
+            boolean handled = super.onTouchEvent(transformed);
+            transformed.recycle();
+            return handled;
         }
 
-        private static int clamp(int value, int min, int max) {
-            return Math.max(min, Math.min(max, value));
+        private static float clamp01(float value) {
+            return Math.max(0f, Math.min(1f, value));
         }
     }
 }
