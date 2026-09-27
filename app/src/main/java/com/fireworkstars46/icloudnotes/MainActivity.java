@@ -274,8 +274,8 @@ public class MainActivity extends Activity {
         help.setTextSize(14f);
         help.setTextColor(Color.rgb(85, 85, 85));
         help.setText(
-                "Slow finger movement stays slow. The faster you swipe, the more the app "
-                        + "ramps toward the maximum below."
+                "Gentle scrolling stays true slow/1:1. Medium movement starts to accelerate, "
+                        + "and only fast swipes ramp strongly toward the maximum below."
         );
         help.setPadding(0, 0, 0, dp(12));
 
@@ -427,11 +427,10 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        // Slow gestures stay at (or below) 1x. Faster gestures ramp progressively
-        // toward the user's selected maximum. Cubic ramp keeps slow movement precise
-        // even when the maximum is extremely high, such as 100x.
-        private static final float SPEED_START = 100f;
-        private static final float SPEED_FOR_MAX = 2800f;
+        // v2.3: a real slow-scroll zone. Gentle movement is never boosted.
+        // Only medium/fast movement enters the acceleration curve.
+        private static final float SPEED_START = 900f;
+        private static final float SPEED_FOR_MAX = 3200f;
 
         private final int touchSlop;
         private final SharedPreferences preferences;
@@ -517,20 +516,27 @@ public class MainActivity extends Activity {
                             (smoothedSpeed * 0.55f)
                                     + (instantaneousSpeed * 0.45f);
 
-                    float t = clamp01(
-                            (smoothedSpeed - SPEED_START)
-                                    / (SPEED_FOR_MAX - SPEED_START)
-                    );
-
-                    // Cubic response: slow stays slow, medium grows gradually,
-                    // and genuinely fast swipes can reach the selected maximum.
-                    float curve = t * t * t;
                     float low = slowMultiplier();
-                    float high = maxMultiplierTenths / 10f;
-                    float target = low + ((high - low) * curve);
 
-                    // Smooth the multiplier itself so acceleration is continuous.
-                    lastMultiplier += (target - lastMultiplier) * 0.60f;
+                    if (smoothedSpeed <= SPEED_START) {
+                        // Hard slow zone: no boost at all for a gentle drag.
+                        lastMultiplier = low;
+                    } else {
+                        float t = clamp01(
+                                (smoothedSpeed - SPEED_START)
+                                        / (SPEED_FOR_MAX - SPEED_START)
+                        );
+
+                        // Quintic response keeps low/medium motion close to 1x,
+                        // then rises very aggressively only on genuinely fast swipes.
+                        float t2 = t * t;
+                        float curve = t2 * t2 * t; // t^5
+                        float high = maxMultiplierTenths / 10f;
+                        float target = low + ((high - low) * curve);
+
+                        // Smooth the multiplier so the transition never snaps.
+                        lastMultiplier += (target - lastMultiplier) * 0.50f;
+                    }
                 } else {
                     lastMultiplier = slowMultiplier();
                 }
