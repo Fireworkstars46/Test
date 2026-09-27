@@ -1,14 +1,18 @@
 package com.fireworkstars46.icloudnotes;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -22,11 +26,21 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.SeekBar;
+import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String START_URL = "https://www.icloud.com/notes/";
     private static final int FILE_CHOOSER_REQUEST = 401;
+
+    private static final String PREFS_NAME = "icloud_notes_preferences";
+    private static final String KEY_SCROLL_SPEED = "fast_scroll_multiplier";
+    private static final float DEFAULT_SCROLL_SPEED = 5.5f;
+    private static final float MIN_SCROLL_SPEED = 1.0f;
+    private static final float MAX_SCROLL_SPEED = 12.0f;
+    private static final float SCROLL_SPEED_STEP = 0.5f;
 
     private FastWebView webView;
     private ValueCallback<Uri[]> fileCallback;
@@ -68,6 +82,28 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT
                 )
         );
+
+        TextView settingsButton = new TextView(this);
+        settingsButton.setText("⚙");
+        settingsButton.setTextSize(21f);
+        settingsButton.setTextColor(Color.rgb(70, 70, 70));
+        settingsButton.setGravity(Gravity.CENTER);
+        settingsButton.setContentDescription("Scroll settings");
+        settingsButton.setAlpha(0.72f);
+        settingsButton.setElevation(dp(5));
+
+        GradientDrawable gearBackground = new GradientDrawable();
+        gearBackground.setShape(GradientDrawable.OVAL);
+        gearBackground.setColor(Color.argb(235, 255, 255, 255));
+        gearBackground.setStroke(dp(1), Color.argb(130, 150, 150, 150));
+        settingsButton.setBackground(gearBackground);
+        settingsButton.setOnClickListener(v -> showScrollSettings());
+
+        FrameLayout.LayoutParams gearParams = new FrameLayout.LayoutParams(dp(42), dp(42));
+        gearParams.gravity = Gravity.END | Gravity.BOTTOM;
+        gearParams.setMargins(dp(8), dp(8), dp(12), dp(12));
+        root.addView(settingsButton, gearParams);
+
         setContentView(root);
         root.requestApplyInsets();
 
@@ -122,8 +158,6 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
-                // Let Android/WebView own the actual momentum physics. Only stop
-                // web-page CSS from layering another smooth-scroll animation on top.
                 view.evaluateJavascript(
                         "(function(){"
                                 + "var id='s22-notes-scroll-tweaks';"
@@ -197,6 +231,75 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showScrollSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(22), dp(8), dp(22), dp(4));
+
+        TextView valueLabel = new TextView(this);
+        valueLabel.setTextSize(18f);
+        valueLabel.setTextColor(Color.rgb(45, 45, 45));
+        valueLabel.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView help = new TextView(this);
+        help.setTextSize(14f);
+        help.setTextColor(Color.rgb(95, 95, 95));
+        help.setText("Higher values make quick swipes move farther and faster. Slow movement stays close to normal. v2.0 used 5.5×.");
+        help.setPadding(0, dp(8), 0, dp(10));
+
+        SeekBar slider = new SeekBar(this);
+        int steps = Math.round((MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP);
+        slider.setMax(steps);
+
+        float current = webView.getMaxMultiplier();
+        slider.setProgress(Math.round((current - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP));
+        updateSpeedLabel(valueLabel, current);
+
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float value = MIN_SCROLL_SPEED + (progress * SCROLL_SPEED_STEP);
+                webView.setMaxMultiplier(value);
+                updateSpeedLabel(valueLabel, value);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) { }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+
+        panel.addView(valueLabel);
+        panel.addView(help);
+        panel.addView(slider);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Scroll sensitivity")
+                .setView(panel)
+                .setPositiveButton("Done", null)
+                .setNegativeButton("Reset to 5.5×", null)
+                .create();
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+            webView.setMaxMultiplier(DEFAULT_SCROLL_SPEED);
+            slider.setProgress(Math.round(
+                    (DEFAULT_SCROLL_SPEED - MIN_SCROLL_SPEED) / SCROLL_SPEED_STEP
+            ));
+            updateSpeedLabel(valueLabel, DEFAULT_SCROLL_SPEED);
+        }));
+
+        dialog.show();
+    }
+
+    private void updateSpeedLabel(TextView label, float value) {
+        label.setText(String.format(java.util.Locale.US, "Fast scroll speed: %.1f×", value));
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -227,15 +330,14 @@ public class MainActivity extends Activity {
     }
 
     private static class FastWebView extends WebView {
-        // v2.0 changes the actual touch stream that WebView receives instead
-        // of trying to add a separate fling afterward. This lets Chromium's
-        // own nested iCloud Notes scroller calculate the higher release speed.
         private static final float MIN_MULTIPLIER = 1.0f;
-        private static final float MAX_MULTIPLIER = 5.5f;
         private static final float SPEED_START = 140f;
         private static final float SPEED_FOR_MAX = 1900f;
 
         private final int touchSlop;
+        private final SharedPreferences preferences;
+
+        private float maxMultiplier;
         private float downX;
         private float downY;
         private float lastRawY;
@@ -247,6 +349,21 @@ public class MainActivity extends Activity {
         FastWebView(Context context) {
             super(context);
             touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+            preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            maxMultiplier = clamp(
+                    preferences.getFloat(KEY_SCROLL_SPEED, DEFAULT_SCROLL_SPEED),
+                    MIN_SCROLL_SPEED,
+                    MAX_SCROLL_SPEED
+            );
+        }
+
+        float getMaxMultiplier() {
+            return maxMultiplier;
+        }
+
+        void setMaxMultiplier(float value) {
+            maxMultiplier = clamp(value, MIN_SCROLL_SPEED, MAX_SCROLL_SPEED);
+            preferences.edit().putFloat(KEY_SCROLL_SPEED, maxMultiplier).apply();
         }
 
         @Override
@@ -286,7 +403,7 @@ public class MainActivity extends Activity {
                     float eased = t * t * (3f - 2f * t);
                     lastMultiplier =
                             MIN_MULTIPLIER
-                                    + (MAX_MULTIPLIER - MIN_MULTIPLIER) * eased;
+                                    + (maxMultiplier - MIN_MULTIPLIER) * eased;
                 } else {
                     lastMultiplier = 1.0f;
                 }
@@ -309,10 +426,6 @@ public class MainActivity extends Activity {
                     transformed.setLocation(event.getX(), virtualY);
                 }
 
-                // Crucially, this ACTION_UP goes through WebView normally. Because
-                // the preceding MOVE events carried the amplified coordinates,
-                // WebView/Chromium sees a genuinely faster gesture and creates its
-                // own smooth coast/deceleration on the correct inner scroll area.
                 boolean handled = super.onTouchEvent(transformed);
                 transformed.recycle();
                 return handled;
@@ -329,6 +442,10 @@ public class MainActivity extends Activity {
 
         private static float clamp01(float value) {
             return Math.max(0f, Math.min(1f, value));
+        }
+
+        private static float clamp(float value, float min, float max) {
+            return Math.max(min, Math.min(max, value));
         }
     }
 }
