@@ -12,10 +12,9 @@ Features:
 - External non-web links open in their matching Android app
 - Optimized WebView scrolling and hardware acceleration
 - Android 16 safe-area handling so the iCloud header is not hidden under the status bar
-- Native 1:1 finger tracking while touching the screen
 - Native WebView momentum after release so scrolling keeps moving and gradually slows down
-- Adaptive fast-swipe boost
-- v1.9 increases fast-swipe boost to roughly 7x–13x with a higher velocity cap while keeping native WebView coast/deceleration
+- v2.0 accelerates the actual touch coordinates WebView receives instead of adding a second fling afterward
+- Slow movement stays near 1x while fast vertical finger movement ramps up to about 5.5x before WebView calculates its own native coast
 - Permanent release signing supported from v1.2 onward
 
 Package: com.fireworkstars46.icloudnotes
