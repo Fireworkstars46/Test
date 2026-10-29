@@ -1,0 +1,210 @@
+name: Build Combined Apps IPA
+
+on:
+  push:
+    branches:
+      - combined-apps-ios
+    paths:
+      - 'CombinedAppsBundle.b64'
+      - '.github/workflows/build-combined-apps-ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out combined app
+        uses: actions/checkout@v4
+
+      - name: Restore combined app source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf CombinedApps
+          base64 --decode CombinedAppsBundle.b64 > CombinedAppsBundle.zip
+          unzip -q CombinedAppsBundle.zip
+          test -f CombinedApps/project.yml
+
+      - name: Check out Uber Eats source
+        uses: actions/checkout@v4
+        with:
+          repository: Fireworkstars46/Uber-Eats-Web-App
+          path: Vendor/UberEatsWebRepo
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate app and shortcut icons
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd CombinedApps
+          mkdir -p Assets.xcassets/AppIcon.appiconset ShortcutIcons
+
+          cat > /tmp/GenerateIcons.swift <<'SWIFT'
+          import AppKit
+
+          func pngData(_ image: NSImage) -> Data {
+              guard let tiff = image.tiffRepresentation,
+                    let bitmap = NSBitmapImageRep(data: tiff),
+                    let data = bitmap.representation(using: .png, properties: [:]) else {
+                  fatalError("Could not encode PNG")
+              }
+              return data
+          }
+
+          func makeIcon(path: String, background: NSColor, lines: [(String, CGFloat, NSFont.Weight, NSColor)]) {
+              let size = NSSize(width: 1024, height: 1024)
+              let image = NSImage(size: size)
+              image.lockFocus()
+              background.setFill()
+              NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+
+              let totalHeight = lines.reduce(CGFloat(0)) { $0 + $1.1 * 1.16 }
+              var y = (1024 + totalHeight) / 2
+              for (text, fontSize, weight, color) in lines {
+                  let font = NSFont.systemFont(ofSize: fontSize, weight: weight)
+                  let attrs: [NSAttributedString.Key: Any] = [
+                      .font: font,
+                      .foregroundColor: color
+                  ]
+                  let textSize = (text as NSString).size(withAttributes: attrs)
+                  y -= textSize.height
+                  (text as NSString).draw(
+                      at: NSPoint(x: (1024 - textSize.width) / 2, y: y),
+                      withAttributes: attrs
+                  )
+                  y -= fontSize * 0.16
+              }
+              image.unlockFocus()
+              try! pngData(image).write(to: URL(fileURLWithPath: path))
+          }
+
+          // Main container icon: three clear mini-app tiles.
+          let main = NSImage(size: NSSize(width: 1024, height: 1024))
+          main.lockFocus()
+          NSColor(calibratedWhite: 0.08, alpha: 1).setFill()
+          NSBezierPath(rect: NSRect(x: 0, y: 0, width: 1024, height: 1024)).fill()
+          let tiles: [(NSRect, NSColor, String, NSColor)] = [
+              (NSRect(x: 115, y: 535, width: 360, height: 360), .white, "GPT", .black),
+              (NSRect(x: 549, y: 535, width: 360, height: 360), NSColor(calibratedRed: 0.02, green: 0.70, blue: 0.36, alpha: 1), "UE", .black),
+              (NSRect(x: 332, y: 105, width: 360, height: 360), .black, "12:34", .white)
+          ]
+          for (rect, fill, text, textColor) in tiles {
+              fill.setFill()
+              NSBezierPath(roundedRect: rect, xRadius: 72, yRadius: 72).fill()
+              let attrs: [NSAttributedString.Key: Any] = [
+                  .font: NSFont.monospacedSystemFont(ofSize: text == "12:34" ? 82 : 110, weight: .bold),
+                  .foregroundColor: textColor
+              ]
+              let t = (text as NSString).size(withAttributes: attrs)
+              (text as NSString).draw(at: NSPoint(x: rect.midX - t.width/2, y: rect.midY - t.height/2), withAttributes: attrs)
+          }
+          main.unlockFocus()
+          try! pngData(main).write(to: URL(fileURLWithPath: "AppIcon1024.png"))
+
+          makeIcon(path: "ShortcutIcons/ChatGPT.png", background: .white,
+                   lines: [("ChatGPT", 175, .bold, .black)])
+          makeIcon(path: "ShortcutIcons/Uber-Eats.png",
+                   background: NSColor(calibratedRed: 0.02, green: 0.70, blue: 0.36, alpha: 1),
+                   lines: [("Uber", 175, .bold, .black), ("Eats", 175, .bold, .black)])
+          makeIcon(path: "ShortcutIcons/Floating-Seconds.png", background: .black,
+                   lines: [("12:34:56", 120, .bold, .white)])
+          SWIFT
+
+          swift /tmp/GenerateIcons.swift
+
+          cat > Assets.xcassets/Contents.json <<'JSON'
+          {
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          JSON
+
+          make_icon () {
+            local px="$1"
+            cp AppIcon1024.png "Assets.xcassets/AppIcon.appiconset/AppIcon-${px}.png"
+            sips -z "$px" "$px" "Assets.xcassets/AppIcon.appiconset/AppIcon-${px}.png" >/dev/null
+          }
+          make_icon 40
+          make_icon 58
+          make_icon 60
+          make_icon 80
+          make_icon 87
+          make_icon 120
+          make_icon 180
+          cp AppIcon1024.png Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+
+          cat > Assets.xcassets/AppIcon.appiconset/Contents.json <<'JSON'
+          {
+            "images" : [
+              {"filename":"AppIcon-40.png","idiom":"iphone","scale":"2x","size":"20x20"},
+              {"filename":"AppIcon-60.png","idiom":"iphone","scale":"3x","size":"20x20"},
+              {"filename":"AppIcon-58.png","idiom":"iphone","scale":"2x","size":"29x29"},
+              {"filename":"AppIcon-87.png","idiom":"iphone","scale":"3x","size":"29x29"},
+              {"filename":"AppIcon-80.png","idiom":"iphone","scale":"2x","size":"40x40"},
+              {"filename":"AppIcon-120.png","idiom":"iphone","scale":"3x","size":"40x40"},
+              {"filename":"AppIcon-120.png","idiom":"iphone","scale":"2x","size":"60x60"},
+              {"filename":"AppIcon-180.png","idiom":"iphone","scale":"3x","size":"60x60"},
+              {"filename":"AppIcon-1024.png","idiom":"ios-marketing","scale":"1x","size":"1024x1024"}
+            ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          JSON
+
+      - name: Generate Xcode project
+        run: |
+          cd CombinedApps
+          xcodegen generate
+
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project CombinedApps/Apps.xcodeproj \
+            -scheme Apps \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release-iphoneos/Apps.app"
+          test -d "$APP_PATH"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry Apps-1.0-unsigned.ipa Payload
+
+      - name: Package source and shortcut icons
+        run: |
+          zip -qry Apps-1.0-Source.zip CombinedApps -x 'CombinedApps/Assets.xcassets/*' 'CombinedApps/AppIcon1024.png' 'CombinedApps/ShortcutIcons/*.png'
+          cp CombinedApps/ShortcutIcons/ChatGPT.png .
+          cp CombinedApps/ShortcutIcons/Uber-Eats.png .
+          cp CombinedApps/ShortcutIcons/Floating-Seconds.png .
+
+      - name: Upload Apps IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apps-1.0-unsigned
+          path: Apps-1.0-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload source and shortcut icons
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apps-1.0-source-and-shortcuts
+          path: |
+            Apps-1.0-Source.zip
+            ChatGPT.png
+            Uber-Eats.png
+            Floating-Seconds.png
+          if-no-files-found: error
