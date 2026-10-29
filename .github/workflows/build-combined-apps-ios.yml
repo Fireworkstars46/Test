@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf CombinedApps
-          base64 --decode CombinedAppsBundle.b64 > CombinedAppsBundle.zip
+          base64 -D -i CombinedAppsBundle.b64 -o CombinedAppsBundle.zip
           unzip -q CombinedAppsBundle.zip
           test -f CombinedApps/project.yml
 
@@ -84,7 +84,6 @@ jobs:
               try! pngData(image).write(to: URL(fileURLWithPath: path))
           }
 
-          // Main container icon: three clear mini-app tiles.
           let main = NSImage(size: NSSize(width: 1024, height: 1024))
           main.lockFocus()
           NSColor(calibratedWhite: 0.08, alpha: 1).setFill()
